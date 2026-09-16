@@ -74,6 +74,17 @@ enum Commands {
         )]
         token: Option<String>,
     },
+    /// Start an MCP server over stdio, or install ghgrab into an MCP client
+    Mcp {
+        #[arg(long, help = "One-time GitHub token for MCP sessions")]
+        token: Option<String>,
+
+        #[arg(
+            long,
+            help = "Auto-configure ghgrab in an MCP client (Claude Desktop, Cursor, VS Code, Windsurf)"
+        )]
+        install: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -165,16 +176,16 @@ pub async fn run() -> Result<()> {
                     let mut config = Config::load()?;
                     config.github_token = Some(value);
                     config.save()?;
-                    println!("✅ GitHub token saved successfully!");
+                    println!("GitHub token saved successfully!");
                 }
                 SetTarget::Path { value } => {
                     if let Err(e) = Config::validate_path(&value) {
-                        eprintln!("❌ Invalid path: {}", e);
+                        eprintln!("Invalid path: {}", e);
                     } else {
                         let mut config = Config::load()?;
                         config.download_path = Some(value);
                         config.save()?;
-                        println!("✅ Download path saved successfully!");
+                        println!("Download path saved successfully!");
                     }
                 }
             },
@@ -183,13 +194,13 @@ pub async fn run() -> Result<()> {
                     let mut config = Config::load()?;
                     config.github_token = None;
                     config.save()?;
-                    println!("✅ GitHub token removed successfully!");
+                    println!("GitHub token removed successfully!");
                 }
                 UnsetTarget::Path => {
                     let mut config = Config::load()?;
                     config.download_path = None;
                     config.save()?;
-                    println!("✅ Download path removed successfully!");
+                    println!("Download path removed successfully!");
                 }
             },
             ConfigCommand::List => {
@@ -296,6 +307,7 @@ pub async fn run() -> Result<()> {
                 cwd,
                 bin_path,
                 token,
+                allow_prompt: true,
             })
             .await
             {
@@ -312,6 +324,14 @@ pub async fn run() -> Result<()> {
             println!("Saved to: {}", result.download_path);
             if let Some(installed_binary) = result.installed_binary {
                 println!("Installed binary: {}", installed_binary);
+            }
+        }
+        Some(Commands::Mcp { token, install }) => {
+            if install {
+                crate::mcp_install::install_mcp_client(default_config.github_token.clone())?;
+            } else {
+                let token = resolve_github_token(token, default_config.github_token.clone())?;
+                crate::mcp::run_mcp_server(token, default_config.download_path.clone()).await?;
             }
         }
         None => {
@@ -352,7 +372,7 @@ fn parse_jobs(s: &str) -> Result<usize, String> {
     }
 }
 
-fn resolve_github_token(
+pub(crate) fn resolve_github_token(
     cli_token: Option<String>,
     config_token: Option<String>,
 ) -> Result<Option<String>> {
@@ -447,10 +467,10 @@ fn resolve_github_token_from_gh_cli(strict: bool) -> Result<Option<String>> {
     }
 
     if tokens.len() == 1 {
-        eprintln!("🔐 Found token via GitHub CLI.");
+        eprintln!("Found token via GitHub CLI.");
     } else {
         eprintln!(
-            "🔐 Found multiple tokens via GitHub CLI output ({}). Using one token.",
+            "Found multiple tokens via GitHub CLI output ({}). Using one token.",
             tokens.len()
         );
     }

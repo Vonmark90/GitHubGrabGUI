@@ -261,6 +261,16 @@ ghgrab agent download https://github.com/rust-lang/rust src/tools --cwd --no-fol
 
 You can pass `--token <TOKEN>` to `agent tree` and `agent download` when an external tool, CI job, or coding agent should authenticate without relying on saved local config.
 
+### MCP (Model Context Protocol) Server
+
+`ghgrab` can act as an MCP server, letting AI coding assistants (Cursor, Claude Desktop, VS Code, Windsurf) search repos, browse trees, and download files/releases directly.
+
+```bash
+ghgrab mcp --install
+```
+
+See the [MCP server docs](https://ghgrab.readthedocs.io/en/latest/commands.html#mcp-model-context-protocol-server) for manual configuration and the full list of exposed tools.
+
 ### Configuration
 
 To manage your settings:
