@@ -1,6 +1,6 @@
 [package]
 name = "ghgrab"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2021"
 default-run = "ghgrab"
 authors = ["abhixdd"]
@@ -33,6 +33,9 @@ tar = "0.4"
 flate2 = "1.0"
 xz2 = "0.1"
 futures = "0.3"
+eframe = "0.36.2"
+rfd = "0.17"
+
 
 [dev-dependencies]
 rusty-hook = "0.11.2"

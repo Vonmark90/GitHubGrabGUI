@@ -1,0 +1,235 @@
+name: Release Git Hub Grab GUI Vaporwave
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-13
+            target: x86_64-apple-darwin
+            suffix: macos-x86_64
+          - os: macos-14
+            target: aarch64-apple-darwin
+            suffix: macos-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build GUI Release
+        run: cargo build --release --bin ghgrab-gui --target ${{ matrix.target }}
+
+      - name: Package macOS .app Bundle
+        shell: bash
+        run: |
+          APP_NAME="Git Hub Grab GUI Vaporwave.app"
+          APP_DIR="dist-app/$APP_NAME"
+          mkdir -p "$APP_DIR/Contents/MacOS"
+          mkdir -p "$APP_DIR/Contents/Resources"
+
+          cp "target/${{ matrix.target }}/release/ghgrab-gui" "$APP_DIR/Contents/MacOS/ghgrab-gui"
+          chmod +x "$APP_DIR/Contents/MacOS/ghgrab-gui"
+
+          if [ -f "assets/AppIcon.icns" ]; then
+            cp "assets/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
+          fi
+
+          cat << "EOF" > "$APP_DIR/Contents/Info.plist"
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleDevelopmentRegion</key>
+              <string>en</string>
+              <key>CFBundleDisplayName</key>
+              <string>Git Hub Grab GUI Vaporwave</string>
+              <key>CFBundleExecutable</key>
+              <string>ghgrab-gui</string>
+              <key>CFBundleIconFile</key>
+              <string>AppIcon</string>
+              <key>CFBundleIdentifier</key>
+              <string>com.abhixdd.github-grab-gui-vaporwave</string>
+              <key>CFBundleInfoDictionaryVersion</key>
+              <string>6.0</string>
+              <key>CFBundleName</key>
+              <string>Git Hub Grab GUI Vaporwave</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>CFBundleShortVersionString</key>
+              <string>2.1.0</string>
+              <key>CFBundleVersion</key>
+              <string>2.1.0</string>
+              <key>LSMinimumSystemVersion</key>
+              <string>10.13</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+          </dict>
+          </plist>
+          EOF
+
+          mkdir -p out
+          ARCHIVE_NAME="Git-Hub-Grab-GUI-Vaporwave-${{ matrix.suffix }}.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "out/$ARCHIVE_NAME"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.suffix }}
+          path: out/*
+
+  build-linux:
+    name: Build Linux (x86_64)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux GUI Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libgtk-3-dev \
+            libx11-dev \
+            libxcursor-dev \
+            libxrandr-dev \
+            libxi-dev \
+            libxinerama-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libgl1-mesa-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Build GUI Release
+        run: cargo build --release --bin ghgrab-gui --target x86_64-unknown-linux-gnu
+
+      - name: Package Linux Archive
+        shell: bash
+        run: |
+          mkdir -p pkg/bin pkg/share/applications pkg/share/icons/hicolor/512x512/apps
+          cp target/x86_64-unknown-linux-gnu/release/ghgrab-gui pkg/bin/ghgrab-gui
+          chmod +x pkg/bin/ghgrab-gui
+
+          if [ -f "assets/icon.png" ]; then
+            cp assets/icon.png pkg/share/icons/hicolor/512x512/apps/ghgrab-gui.png
+          fi
+
+          cat << "EOF" > pkg/share/applications/ghgrab-gui.desktop
+          [Desktop Entry]
+          Name=Git Hub Grab GUI Vaporwave
+          Comment=Vaporwave Git Forge Downloader GUI
+          Exec=ghgrab-gui
+          Icon=ghgrab-gui
+          Terminal=false
+          Type=Application
+          Categories=Utility;Network;
+          EOF
+
+          mkdir -p out
+          ARCHIVE_NAME="Git-Hub-Grab-GUI-Vaporwave-Linux-x86_64.tar.gz"
+          tar -czvf "out/$ARCHIVE_NAME" -C pkg .
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-x86_64
+          path: out/*
+
+  build-windows:
+    name: Build Windows (x86_64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Build GUI Release
+        run: cargo build --release --bin ghgrab-gui --target x86_64-pc-windows-msvc
+
+      - name: Package Windows Archive
+        shell: bash
+        run: |
+          mkdir -p pkg-win
+          cp target/x86_64-pc-windows-msvc/release/ghgrab-gui.exe pkg-win/
+          if [ -f "README.md" ]; then cp README.md pkg-win/; fi
+          if [ -f "LICENSE" ]; then cp LICENSE pkg-win/; fi
+
+          mkdir -p out
+          ARCHIVE_NAME="Git-Hub-Grab-GUI-Vaporwave-Windows-x86_64.zip"
+          cd pkg-win && 7z a "../out/$ARCHIVE_NAME" *
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-x86_64
+          path: out/*
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: [build-macos, build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-assets
+          merge-multiple: true
+
+      - name: Generate Checksums & List
+        shell: bash
+        run: |
+          cd ./release-assets
+          sha256sum * > SHA256SUMS.txt
+          ls -la
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME:-v2.2.0-vaporwave}"
+          if [[ "$TAG_NAME" != v* ]]; then
+            TAG_NAME="v2.2.0-vaporwave"
+          fi
+
+          gh release create "$TAG_NAME" ./release-assets/* \
+            --title "🌴 Git Hub Grab GUI Vaporwave ($TAG_NAME)" \
+            --clobber \
+            --notes "### 🌴 Git Hub Grab GUI Vaporwave Edition
+
+Cross-platform release packages for macOS, Linux, and Windows:
+
+- **macOS (Apple Silicon & Intel)**: \`Git-Hub-Grab-GUI-Vaporwave-macos-arm64.zip\`, \`Git-Hub-Grab-GUI-Vaporwave-macos-x86_64.zip\`
+- **Linux (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Linux-x86_64.tar.gz\`
+- **Windows (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Windows-x86_64.zip\`
+
+#### Features:
+- 🌴 Complete Vaporwave dark obsidian & neon color theme
+- 📁 Interactive repository browser with live file code previewer
+- 🚀 GitHub Release & asset downloader
+- 🔍 Built-in GitHub repo search & discovery
+- ⚡ High-performance pure Rust GUI powered by egui & tokio
+"
