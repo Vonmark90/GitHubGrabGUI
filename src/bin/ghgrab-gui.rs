@@ -317,9 +317,10 @@ impl GhGrabGuiApp {
                             jobs,
                         } => {
                             let total = items.len();
-                            let client = match current_client.clone() {
-                                Some(c) => c,
-                                None => match GitHubClient::new(token) {
+                            let client = if let Some(ref c) = current_client {
+                                c.clone()
+                            } else {
+                                match GitHubClient::new(token) {
                                     Ok(c) => c,
                                     Err(e) => {
                                         let _ = event_tx.send(WorkerEvent::Error(format!(
@@ -328,7 +329,7 @@ impl GhGrabGuiApp {
                                         )));
                                         continue;
                                     }
-                                },
+                                }
                             };
 
                             match Downloader::new(dest.clone(), client, jobs) {
@@ -375,9 +376,10 @@ impl GhGrabGuiApp {
                             dest,
                             token,
                         } => {
-                            let client = match current_client.clone() {
-                                Some(c) => c,
-                                None => match GitHubClient::new(token) {
+                            let client = if let Some(ref c) = current_client {
+                                c.clone()
+                            } else {
+                                match GitHubClient::new(token) {
                                     Ok(c) => c,
                                     Err(e) => {
                                         let _ = event_tx.send(WorkerEvent::Error(format!(
@@ -386,7 +388,7 @@ impl GhGrabGuiApp {
                                         )));
                                         continue;
                                     }
-                                },
+                                }
                             };
 
                             let _ = event_tx.send(WorkerEvent::DownloadProgress {
@@ -814,8 +816,7 @@ impl GhGrabGuiApp {
 
                 ui.add_space(16.0);
 
-                // Main Download Button in signature Hot Pink
-                let can_download = selected_count > 0 && !self.is_busy;
+                let can_download = selected_count > 0 && self.is_busy == false;
                 let btn_text = if selected_count == 0 {
                     "▼ SELECT ITEMS TO DOWNLOAD".to_string()
                 } else {
