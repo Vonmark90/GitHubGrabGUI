@@ -215,21 +215,24 @@ jobs:
             TAG_NAME="v2.2.0-vaporwave"
           fi
 
+          cat << "EOF" > release_notes.md
+          ### 🌴 Git Hub Grab GUI Vaporwave Edition
+
+          Cross-platform release packages for macOS, Linux, and Windows:
+
+          - **macOS (Apple Silicon & Intel)**: \`Git-Hub-Grab-GUI-Vaporwave-macos-arm64.zip\`, \`Git-Hub-Grab-GUI-Vaporwave-macos-x86_64.zip\`
+          - **Linux (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Linux-x86_64.tar.gz\`
+          - **Windows (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Windows-x86_64.zip\`
+
+          #### Features:
+          - 🌴 Complete Vaporwave dark obsidian & neon color theme
+          - 📁 Interactive repository browser with live file code previewer
+          - 🚀 GitHub Release & asset downloader
+          - 🔍 Built-in GitHub repo search & discovery
+          - ⚡ High-performance pure Rust GUI powered by egui & tokio
+          EOF
+
           gh release create "$TAG_NAME" ./release-assets/* \
             --title "🌴 Git Hub Grab GUI Vaporwave ($TAG_NAME)" \
-            --clobber \
-            --notes "### 🌴 Git Hub Grab GUI Vaporwave Edition
-
-Cross-platform release packages for macOS, Linux, and Windows:
-
-- **macOS (Apple Silicon & Intel)**: \`Git-Hub-Grab-GUI-Vaporwave-macos-arm64.zip\`, \`Git-Hub-Grab-GUI-Vaporwave-macos-x86_64.zip\`
-- **Linux (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Linux-x86_64.tar.gz\`
-- **Windows (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Windows-x86_64.zip\`
-
-#### Features:
-- 🌴 Complete Vaporwave dark obsidian & neon color theme
-- 📁 Interactive repository browser with live file code previewer
-- 🚀 GitHub Release & asset downloader
-- 🔍 Built-in GitHub repo search & discovery
-- ⚡ High-performance pure Rust GUI powered by egui & tokio
-"
+            --notes-file release_notes.md \
+            --clobber
