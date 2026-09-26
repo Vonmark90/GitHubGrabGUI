@@ -1,45 +1,280 @@
 use eframe::egui::{self, Color32, Margin, RichText, Stroke, Vec2};
 use ghgrab::config::Config;
 use ghgrab::download::Downloader;
-use ghgrab::github::{GitHubClient, GitHubRelease, GitHubReleaseAsset, GitHubUrl, RepoItem, SearchItem};
+use ghgrab::github::{
+    GitHubClient, GitHubRelease, GitHubReleaseAsset, GitHubUrl, RepoItem, SearchItem,
+};
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::Instant;
 
-/// Signature Vaporwave Color Palette
-#[allow(dead_code)]
-struct VpColors;
+// ============================================================================
+// Multi-Theme System (GitHub Dark, GitHub Light, Vaporwave High-Contrast)
+// ============================================================================
 
-#[allow(dead_code)]
-impl VpColors {
-    // Deep nocturnal obsidian-purple dark shades (NO white anywhere)
-    pub const BG_BASE: Color32 = Color32::from_rgb(14, 8, 25);         // #0e0819 Deep nocturnal purple
-    pub const BG_TOP: Color32 = Color32::from_rgb(20, 11, 36);         // #140b24
-    pub const BG_SIDEBAR: Color32 = Color32::from_rgb(23, 12, 42);     // #170c2a
-    pub const BG_CARD: Color32 = Color32::from_rgb(33, 17, 60);        // #21113c
-    pub const BG_CARD_ALT: Color32 = Color32::from_rgb(40, 21, 72);    // #281548
-    pub const BG_INPUT: Color32 = Color32::from_rgb(26, 13, 47);       // #1a0d2f
-    pub const BG_PREVIEW: Color32 = Color32::from_rgb(9, 4, 17);       // #090411 Pitch dark synth console
-    pub const BORDER: Color32 = Color32::from_rgb(66, 34, 118);        // #422276
-    pub const BORDER_BRIGHT: Color32 = Color32::from_rgb(125, 62, 220); // #7d3edc
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum ThemeMode {
+    #[default]
+    GitHubDark,
+    GitHubLight,
+    Vaporwave,
+}
 
-    // Signature Neon Vaporwave Accents
-    pub const PINK: Color32 = Color32::from_rgb(255, 113, 206);       // #ff71ce (Neon Hot Pink)
-    pub const CYAN: Color32 = Color32::from_rgb(1, 205, 254);         // #01cdfe (Laser Teal / Cyan)
-    pub const MINT: Color32 = Color32::from_rgb(5, 255, 161);         // #05ffa1 (Turquoise Mint)
-    pub const YELLOW: Color32 = Color32::from_rgb(255, 251, 150);     // #fffb96 (Pastel Sunset Gold)
-    pub const PURPLE: Color32 = Color32::from_rgb(185, 103, 255);     // #b967ff (Electric Lavender)
+#[derive(Debug, Clone)]
+pub struct AppTheme {
+    pub is_dark: bool,
+
+    // Backgrounds
+    pub bg_base: Color32,
+    pub bg_surface: Color32,
+    pub bg_panel: Color32,
+    pub bg_card: Color32,
+    pub bg_card_alt: Color32,
+    pub bg_input: Color32,
+    pub bg_code: Color32,
+
+    // Borders
+    pub border: Color32,
+    pub border_subtle: Color32,
+    pub border_focus: Color32,
 
     // Text hierarchy
-    pub const TEXT_PRIMARY: Color32 = Color32::from_rgb(251, 245, 255);
-    pub const TEXT_SECONDARY: Color32 = Color32::from_rgb(215, 195, 245);
-    pub const TEXT_MUTED: Color32 = Color32::from_rgb(155, 130, 190);
-    pub const TEXT_DARK: Color32 = Color32::from_rgb(20, 10, 36);
+    pub text_primary: Color32,
+    pub text_secondary: Color32,
+    pub text_muted: Color32,
+    pub text_on_accent: Color32,
+
+    // Accents & Actions
+    pub accent: Color32,
+    pub accent_hover: Color32,
+    pub success: Color32,
+    pub success_hover: Color32,
+    pub warning: Color32,
+    pub error: Color32,
+    pub folder: Color32,
+    pub row_selected: Color32,
+    pub row_hover: Color32,
 }
+
+impl ThemeMode {
+    pub fn get_theme(self) -> AppTheme {
+        match self {
+            ThemeMode::GitHubDark => AppTheme {
+                is_dark: true,
+                bg_base: Color32::from_rgb(13, 17, 23), // #0d1117 (GitHub canvas)
+                bg_surface: Color32::from_rgb(22, 27, 34), // #161b22 (GitHub header/sidebar)
+                bg_panel: Color32::from_rgb(22, 27, 34), // #161b22
+                bg_card: Color32::from_rgb(33, 38, 45), // #21262d (GitHub card)
+                bg_card_alt: Color32::from_rgb(48, 54, 61), // #30363d
+                bg_input: Color32::from_rgb(13, 17, 23), // #0d1117
+                bg_code: Color32::from_rgb(10, 12, 16), // #0a0c10 (Deep code editor)
+                border: Color32::from_rgb(48, 54, 61),  // #30363d
+                border_subtle: Color32::from_rgb(33, 38, 45), // #21262d
+                border_focus: Color32::from_rgb(88, 166, 255), // #58a6ff
+                text_primary: Color32::from_rgb(240, 246, 252), // #f0f6fc (High-contrast white)
+                text_secondary: Color32::from_rgb(201, 209, 217), // #c9d1d9
+                text_muted: Color32::from_rgb(139, 148, 158), // #8b949e
+                text_on_accent: Color32::WHITE,
+                accent: Color32::from_rgb(88, 166, 255), // #58a6ff (GitHub Blue)
+                accent_hover: Color32::from_rgb(121, 192, 255),
+                success: Color32::from_rgb(35, 134, 54), // #238636 (GitHub Green)
+                success_hover: Color32::from_rgb(46, 160, 67), // #2ea043
+                warning: Color32::from_rgb(210, 153, 34), // #d29922 (GitHub Gold)
+                error: Color32::from_rgb(248, 81, 73),   // #f85149 (GitHub Red)
+                folder: Color32::from_rgb(121, 192, 255), // #79c0ff (Directory cyan-blue)
+                row_selected: Color32::from_rgb(30, 48, 75), // Dark blue row selection
+                row_hover: Color32::from_rgb(28, 33, 40),
+            },
+            ThemeMode::GitHubLight => AppTheme {
+                is_dark: false,
+                bg_base: Color32::from_rgb(255, 255, 255),
+                bg_surface: Color32::from_rgb(246, 248, 250),
+                bg_panel: Color32::from_rgb(246, 248, 250),
+                bg_card: Color32::from_rgb(255, 255, 255),
+                bg_card_alt: Color32::from_rgb(234, 238, 242),
+                bg_input: Color32::from_rgb(255, 255, 255),
+                bg_code: Color32::from_rgb(246, 248, 250),
+                border: Color32::from_rgb(208, 215, 222),
+                border_subtle: Color32::from_rgb(234, 238, 242),
+                border_focus: Color32::from_rgb(9, 105, 218),
+                text_primary: Color32::from_rgb(31, 35, 40),
+                text_secondary: Color32::from_rgb(101, 109, 118),
+                text_muted: Color32::from_rgb(125, 133, 144),
+                text_on_accent: Color32::WHITE,
+                accent: Color32::from_rgb(9, 105, 218),
+                accent_hover: Color32::from_rgb(4, 82, 178),
+                success: Color32::from_rgb(31, 136, 61),
+                success_hover: Color32::from_rgb(26, 127, 55),
+                warning: Color32::from_rgb(154, 103, 0),
+                error: Color32::from_rgb(207, 34, 46),
+                folder: Color32::from_rgb(9, 105, 218),
+                row_selected: Color32::from_rgb(221, 234, 254),
+                row_hover: Color32::from_rgb(240, 243, 246),
+            },
+            ThemeMode::Vaporwave => AppTheme {
+                is_dark: true,
+                bg_base: Color32::from_rgb(18, 12, 34), // #120c22 Deep nocturnal purple
+                bg_surface: Color32::from_rgb(28, 18, 52), // #1c1234
+                bg_panel: Color32::from_rgb(28, 18, 52),
+                bg_card: Color32::from_rgb(44, 26, 80), // #2c1a50
+                bg_card_alt: Color32::from_rgb(60, 36, 108), // #3c246c
+                bg_input: Color32::from_rgb(24, 14, 44),
+                bg_code: Color32::from_rgb(12, 8, 24), // Pitch synth console
+                border: Color32::from_rgb(90, 50, 150),
+                border_subtle: Color32::from_rgb(66, 34, 118),
+                border_focus: Color32::from_rgb(1, 205, 254),
+                text_primary: Color32::from_rgb(255, 255, 255), // Pure crisp white for readability
+                text_secondary: Color32::from_rgb(230, 220, 250), // High-contrast pale lavender
+                text_muted: Color32::from_rgb(180, 160, 215),   // Readable bright lavender
+                text_on_accent: Color32::from_rgb(18, 12, 34),
+                accent: Color32::from_rgb(1, 205, 254), // Neon Cyan
+                accent_hover: Color32::from_rgb(90, 225, 255),
+                success: Color32::from_rgb(5, 255, 161), // Neon Mint
+                success_hover: Color32::from_rgb(50, 255, 180),
+                warning: Color32::from_rgb(255, 251, 150), // Sunset Gold
+                error: Color32::from_rgb(255, 113, 206),   // Hot Pink
+                folder: Color32::from_rgb(1, 205, 254),
+                row_selected: Color32::from_rgb(55, 32, 100),
+                row_hover: Color32::from_rgb(38, 22, 70),
+            },
+        }
+    }
+
+    pub fn apply(self, ctx: &egui::Context) {
+        let theme = self.get_theme();
+        let mut visuals = if theme.is_dark {
+            egui::Visuals::dark()
+        } else {
+            egui::Visuals::light()
+        };
+
+        visuals.dark_mode = theme.is_dark;
+        visuals.override_text_color = None; // Never hard-override; preserves RichText styling!
+        visuals.panel_fill = theme.bg_surface;
+        visuals.window_fill = theme.bg_base;
+        visuals.extreme_bg_color = theme.bg_input;
+        visuals.faint_bg_color = theme.bg_card;
+        visuals.code_bg_color = theme.bg_code;
+        visuals.hyperlink_color = theme.accent;
+        visuals.warn_fg_color = theme.warning;
+        visuals.error_fg_color = theme.error;
+
+        visuals.selection.bg_fill = if theme.is_dark {
+            Color32::from_rgb(40, 75, 120)
+        } else {
+            Color32::from_rgb(180, 215, 255)
+        };
+        visuals.selection.stroke = Stroke::new(1.0, theme.accent);
+
+        // Non-interactive widgets
+        visuals.widgets.noninteractive.bg_fill = theme.bg_card;
+        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, theme.border_subtle);
+        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, theme.text_secondary);
+
+        // Inactive widgets
+        visuals.widgets.inactive.bg_fill = theme.bg_card;
+        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, theme.border);
+        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, theme.text_primary);
+
+        // Hovered widgets
+        visuals.widgets.hovered.bg_fill = theme.bg_card_alt;
+        visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, theme.border_focus);
+        visuals.widgets.hovered.fg_stroke = Stroke::new(1.0, theme.text_primary);
+
+        // Active widgets
+        visuals.widgets.active.bg_fill = theme.border_focus.gamma_multiply(0.25);
+        visuals.widgets.active.bg_stroke = Stroke::new(1.5, theme.border_focus);
+        visuals.widgets.active.fg_stroke = Stroke::new(1.5, theme.text_primary);
+
+        // Open widgets
+        visuals.widgets.open.bg_fill = theme.bg_card_alt;
+        visuals.widgets.open.bg_stroke = Stroke::new(1.0, theme.border_focus);
+        visuals.widgets.open.fg_stroke = Stroke::new(1.0, theme.text_primary);
+
+        ctx.set_visuals(visuals);
+    }
+}
+
+// ============================================================================
+// Cross-Platform Helper Functions
+// ============================================================================
+
+pub fn open_path_in_file_manager(path: &Path) {
+    let _ = std::fs::create_dir_all(path);
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(path).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = Command::new("explorer").arg(path).spawn();
+    #[cfg(target_os = "linux")]
+    let _ = Command::new("xdg-open").arg(path).spawn();
+}
+
+pub fn open_url_in_browser(url: &str) {
+    #[cfg(target_os = "macos")]
+    let _ = Command::new("open").arg(url).spawn();
+    #[cfg(target_os = "windows")]
+    let _ = Command::new("rundll32")
+        .args(["url.dll,FileProtocolHandler", url])
+        .spawn();
+    #[cfg(target_os = "linux")]
+    let _ = Command::new("xdg-open").arg(url).spawn();
+}
+
+fn is_binary_extension(ext: &str) -> bool {
+    matches!(
+        ext.to_lowercase().as_str(),
+        "png"
+            | "jpg"
+            | "jpeg"
+            | "gif"
+            | "ico"
+            | "webp"
+            | "svg"
+            | "bmp"
+            | "tiff"
+            | "zip"
+            | "tar"
+            | "gz"
+            | "bz2"
+            | "xz"
+            | "7z"
+            | "rar"
+            | "pdf"
+            | "exe"
+            | "bin"
+            | "dll"
+            | "so"
+            | "dylib"
+            | "class"
+            | "wasm"
+            | "mp3"
+            | "mp4"
+            | "wav"
+            | "flac"
+            | "ogg"
+            | "webm"
+            | "mkv"
+            | "avi"
+            | "ttf"
+            | "otf"
+            | "woff"
+            | "woff2"
+            | "eot"
+            | "iso"
+            | "dmg"
+            | "pkg"
+            | "deb"
+            | "rpm"
+    )
+}
+
+// ============================================================================
+// Data Models & Worker Messages
+// ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum AppTab {
@@ -106,10 +341,18 @@ enum WorkerEvent {
     Error(String),
 }
 
+// ============================================================================
+// Main Application State
+// ============================================================================
+
 struct GhGrabGuiApp {
+    // Theme
+    theme_mode: ThemeMode,
+
     // Inputs & Options
     repo_url_input: String,
     token_input: String,
+    show_token: bool,
     search_query_input: String,
     filter_input: String,
     dest_path: PathBuf,
@@ -146,37 +389,8 @@ struct GhGrabGuiApp {
 
 impl GhGrabGuiApp {
     fn new(cc: &eframe::CreationContext) -> Self {
-        // Configure global Vaporwave Visuals in egui
-        let mut visuals = egui::Visuals::dark();
-        visuals.panel_fill = VpColors::BG_BASE;
-        visuals.window_fill = VpColors::BG_BASE;
-        visuals.extreme_bg_color = VpColors::BG_INPUT;
-        visuals.faint_bg_color = VpColors::BG_CARD;
-        visuals.code_bg_color = VpColors::BG_PREVIEW;
-        visuals.hyperlink_color = VpColors::CYAN;
-        visuals.warn_fg_color = VpColors::YELLOW;
-        visuals.error_fg_color = VpColors::PINK;
-
-        visuals.selection.bg_fill = Color32::from_rgb(140, 50, 160);
-        visuals.selection.stroke = Stroke::new(1.0, VpColors::CYAN);
-
-        visuals.widgets.noninteractive.bg_fill = VpColors::BG_CARD;
-        visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, VpColors::BORDER);
-        visuals.widgets.noninteractive.fg_stroke = Stroke::new(1.0, VpColors::TEXT_SECONDARY);
-
-        visuals.widgets.inactive.bg_fill = VpColors::BG_CARD;
-        visuals.widgets.inactive.bg_stroke = Stroke::new(1.0, VpColors::BORDER);
-        visuals.widgets.inactive.fg_stroke = Stroke::new(1.0, VpColors::TEXT_PRIMARY);
-
-        visuals.widgets.hovered.bg_fill = Color32::from_rgb(56, 30, 102);
-        visuals.widgets.hovered.bg_stroke = Stroke::new(1.5, VpColors::PINK);
-        visuals.widgets.hovered.fg_stroke = Stroke::new(1.5, Color32::WHITE);
-
-        visuals.widgets.active.bg_fill = Color32::from_rgb(82, 42, 148);
-        visuals.widgets.active.bg_stroke = Stroke::new(1.5, VpColors::CYAN);
-        visuals.widgets.active.fg_stroke = Stroke::new(1.5, VpColors::CYAN);
-
-        cc.egui_ctx.set_visuals(visuals);
+        let theme_mode = ThemeMode::GitHubDark;
+        theme_mode.apply(&cc.egui_ctx);
 
         let (cmd_tx, cmd_rx) = channel::<GuiCommand>();
         let (event_tx, event_rx) = channel::<WorkerEvent>();
@@ -194,33 +408,28 @@ impl GhGrabGuiApp {
 
                 while let Ok(cmd) = cmd_rx.recv() {
                     match cmd {
-                        GuiCommand::LoadRepo { url, token } => {
-                            match GitHubUrl::parse(&url) {
-                                Ok(gh_url) => {
-                                    match GitHubClient::new_for_url(token, &gh_url) {
-                                        Ok(client) => {
-                                            let api_url = gh_url.api_url();
-                                            match client.fetch_contents(&api_url).await {
-                                                Ok(mut items) => {
-                                                    client.resolve_lfs_files(&mut items, &gh_url.owner, &gh_url.repo, &gh_url.branch).await;
-                                                    current_client = Some(client);
-                                                    current_url = Some(gh_url.clone());
-                                                    let _ = event_tx.send(WorkerEvent::RepoLoaded {
-                                                        gh_url,
-                                                        items,
-                                                    });
-                                                }
-                                                Err(e) => {
-                                                    let _ = event_tx.send(WorkerEvent::Error(format!(
-                                                        "Failed to fetch repository contents: {}",
-                                                        e
-                                                    )));
-                                                }
-                                            }
+                        GuiCommand::LoadRepo { url, token } => match GitHubUrl::parse(&url) {
+                            Ok(gh_url) => match GitHubClient::new_for_url(token, &gh_url) {
+                                Ok(client) => {
+                                    let api_url = gh_url.api_url();
+                                    match client.fetch_contents(&api_url).await {
+                                        Ok(mut items) => {
+                                            client
+                                                .resolve_lfs_files(
+                                                    &mut items,
+                                                    &gh_url.owner,
+                                                    &gh_url.repo,
+                                                    &gh_url.branch,
+                                                )
+                                                .await;
+                                            current_client = Some(client);
+                                            current_url = Some(gh_url.clone());
+                                            let _ = event_tx
+                                                .send(WorkerEvent::RepoLoaded { gh_url, items });
                                         }
                                         Err(e) => {
                                             let _ = event_tx.send(WorkerEvent::Error(format!(
-                                                "Failed to initialize client: {}",
+                                                "Failed to fetch repository contents: {}",
                                                 e
                                             )));
                                         }
@@ -228,20 +437,34 @@ impl GhGrabGuiApp {
                                 }
                                 Err(e) => {
                                     let _ = event_tx.send(WorkerEvent::Error(format!(
-                                        "Invalid repository URL: {}",
+                                        "Failed to initialize GitHub client: {}",
                                         e
                                     )));
                                 }
+                            },
+                            Err(e) => {
+                                let _ = event_tx.send(WorkerEvent::Error(format!(
+                                    "Invalid repository URL: {}",
+                                    e
+                                )));
                             }
-                        }
+                        },
 
                         GuiCommand::NavigateTo { path } => {
                             if let (Some(client), Some(gh_url)) = (&current_client, &current_url) {
                                 let api_url = gh_url.contents_api_url_for_path(&path);
                                 match client.fetch_contents(&api_url).await {
                                     Ok(mut items) => {
-                                        client.resolve_lfs_files(&mut items, &gh_url.owner, &gh_url.repo, &gh_url.branch).await;
-                                        let _ = event_tx.send(WorkerEvent::FolderLoaded { path, items });
+                                        client
+                                            .resolve_lfs_files(
+                                                &mut items,
+                                                &gh_url.owner,
+                                                &gh_url.repo,
+                                                &gh_url.branch,
+                                            )
+                                            .await;
+                                        let _ = event_tx
+                                            .send(WorkerEvent::FolderLoaded { path, items });
                                     }
                                     Err(e) => {
                                         let _ = event_tx.send(WorkerEvent::Error(format!(
@@ -277,7 +500,8 @@ impl GhGrabGuiApp {
                             if let (Some(client), Some(gh_url)) = (&current_client, &current_url) {
                                 match client.fetch_releases(&gh_url.owner, &gh_url.repo).await {
                                     Ok(releases) => {
-                                        let _ = event_tx.send(WorkerEvent::ReleasesLoaded(releases));
+                                        let _ =
+                                            event_tx.send(WorkerEvent::ReleasesLoaded(releases));
                                     }
                                     Err(e) => {
                                         let _ = event_tx.send(WorkerEvent::Error(format!(
@@ -299,13 +523,12 @@ impl GhGrabGuiApp {
                                 .unwrap_or_else(|| GitHubClient::new(None).unwrap());
                             match client.search_repositories(&query).await {
                                 Ok(results) => {
-                                    let _ = event_tx.send(WorkerEvent::SearchResultsLoaded(results));
+                                    let _ =
+                                        event_tx.send(WorkerEvent::SearchResultsLoaded(results));
                                 }
                                 Err(e) => {
-                                    let _ = event_tx.send(WorkerEvent::Error(format!(
-                                        "Search failed: {}",
-                                        e
-                                    )));
+                                    let _ = event_tx
+                                        .send(WorkerEvent::Error(format!("Search failed: {}", e)));
                                 }
                             }
                         }
@@ -324,7 +547,7 @@ impl GhGrabGuiApp {
                                     Ok(c) => c,
                                     Err(e) => {
                                         let _ = event_tx.send(WorkerEvent::Error(format!(
-                                            "Client creation error: {}",
+                                            "Failed to initialize client: {}",
                                             e
                                         )));
                                         continue;
@@ -334,48 +557,42 @@ impl GhGrabGuiApp {
 
                             match Downloader::new(dest.clone(), client, jobs) {
                                 Ok(downloader) => {
-                                    let tx_clone = event_tx.clone();
+                                    let progress_tx = event_tx.clone();
                                     let completed_counter = Arc::new(AtomicUsize::new(0));
-                                    let progress_cb = move |msg: String| {
-                                        let completed = completed_counter.fetch_add(1, Ordering::SeqCst) + 1;
-                                        let _ = tx_clone.send(WorkerEvent::DownloadProgress {
-                                            message: msg,
-                                            completed: completed.min(total),
-                                            total,
-                                        });
+                                    let errors = match downloader
+                                        .download_items(&items, "", move |msg| {
+                                            let count = completed_counter
+                                                .fetch_add(1, Ordering::SeqCst)
+                                                + 1;
+                                            let _ =
+                                                progress_tx.send(WorkerEvent::DownloadProgress {
+                                                    message: msg,
+                                                    completed: count,
+                                                    total,
+                                                });
+                                        })
+                                        .await
+                                    {
+                                        Ok(errs) => errs,
+                                        Err(e) => vec![e.to_string()],
                                     };
 
-                                    match downloader.download_items(&items, "", progress_cb).await {
-                                        Ok(downloaded) => {
-                                            let _ = event_tx.send(WorkerEvent::DownloadFinished {
-                                                dest,
-                                                count: downloaded.len(),
-                                                errors: vec![],
-                                            });
-                                        }
-                                        Err(e) => {
-                                            let _ = event_tx.send(WorkerEvent::DownloadFinished {
-                                                dest,
-                                                count: 0,
-                                                errors: vec![e.to_string()],
-                                            });
-                                        }
-                                    }
+                                    let _ = event_tx.send(WorkerEvent::DownloadFinished {
+                                        dest,
+                                        count: total,
+                                        errors,
+                                    });
                                 }
                                 Err(e) => {
                                     let _ = event_tx.send(WorkerEvent::Error(format!(
-                                        "Failed to initialize downloader: {}",
+                                        "Failed to create downloader: {}",
                                         e
                                     )));
                                 }
                             }
                         }
 
-                        GuiCommand::DownloadReleaseAsset {
-                            asset,
-                            dest,
-                            token,
-                        } => {
+                        GuiCommand::DownloadReleaseAsset { asset, dest, token } => {
                             let client = if let Some(ref c) = current_client {
                                 c.clone()
                             } else {
@@ -383,7 +600,7 @@ impl GhGrabGuiApp {
                                     Ok(c) => c,
                                     Err(e) => {
                                         let _ = event_tx.send(WorkerEvent::Error(format!(
-                                            "Client error: {}",
+                                            "Failed to initialize client: {}",
                                             e
                                         )));
                                         continue;
@@ -392,11 +609,12 @@ impl GhGrabGuiApp {
                             };
 
                             let _ = event_tx.send(WorkerEvent::DownloadProgress {
-                                message: format!("Downloading {}...", asset.name),
+                                message: format!("Downloading release asset: {}", asset.name),
                                 completed: 0,
                                 total: 1,
                             });
 
+                            let _ = std::fs::create_dir_all(&dest);
                             match client.fetch_bytes(&asset.browser_download_url).await {
                                 Ok(bytes) => {
                                     let target_file = dest.join(&asset.name);
@@ -412,7 +630,10 @@ impl GhGrabGuiApp {
                                             let _ = event_tx.send(WorkerEvent::DownloadFinished {
                                                 dest,
                                                 count: 0,
-                                                errors: vec![format!("Failed to write file: {}", e)],
+                                                errors: vec![format!(
+                                                    "Failed to write file: {}",
+                                                    e
+                                                )],
                                             });
                                         }
                                     }
@@ -451,8 +672,10 @@ impl GhGrabGuiApp {
         }
 
         Self {
+            theme_mode,
             repo_url_input: "https://github.com/ratatui/ratatui".to_string(),
             token_input: initial_token,
+            show_token: false,
             search_query_input: String::new(),
             filter_input: String::new(),
             dest_path: default_dest,
@@ -487,6 +710,14 @@ impl GhGrabGuiApp {
         self.status_message = Some((msg.into(), is_error, Instant::now()));
     }
 
+    fn sort_items(&mut self) {
+        self.items.sort_by(|a, b| match (a.is_dir(), b.is_dir()) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a.name.to_lowercase().cmp(&b.name.to_lowercase()),
+        });
+    }
+
     fn poll_events(&mut self) {
         while let Ok(event) = self.event_rx.try_recv() {
             match event {
@@ -496,6 +727,7 @@ impl GhGrabGuiApp {
                     self.current_path = String::new();
                     self.path_breadcrumbs.clear();
                     self.items = items;
+                    self.sort_items();
                     self.selected_paths.clear();
                     self.selected_preview_item = None;
                     self.preview_content = None;
@@ -510,6 +742,7 @@ impl GhGrabGuiApp {
                         path.split('/').map(|s| s.to_string()).collect()
                     };
                     self.items = items;
+                    self.sort_items();
                     self.selected_preview_item = None;
                     self.preview_content = None;
                     self.set_status(format!("Opened folder: /{}", path), false);
@@ -553,13 +786,11 @@ impl GhGrabGuiApp {
                             format!("Successfully downloaded {} item(s) to {:?}", count, dest),
                             false,
                         );
-                        self.download_logs.push(format!(
-                            "Completed: {} item(s) saved to {:?}",
-                            count, dest
-                        ));
+                        self.download_logs
+                            .push(format!("Success: {} item(s) saved to {:?}", count, dest));
                     } else {
                         let err_msg = errors.join(", ");
-                        self.set_status(format!("Download completed with errors: {}", err_msg), true);
+                        self.set_status(format!("Download errors: {}", err_msg), true);
                         self.download_logs.push(format!("Errors: {}", err_msg));
                     }
                 }
@@ -581,84 +812,160 @@ impl GhGrabGuiApp {
         } else if bytes >= MB {
             format!("{:.1} MB", bytes as f64 / MB as f64)
         } else if bytes >= KB {
-            format!("{:.0} KB", bytes as f64 / KB as f64)
+            format!("{:.1} KB", bytes as f64 / KB as f64)
         } else {
             format!("{} B", bytes)
         }
     }
 
+    fn get_file_icon(name: &str, is_dir: bool, is_lfs: bool) -> &'static str {
+        if is_dir {
+            return "📁";
+        }
+        if is_lfs {
+            return "📦";
+        }
+        let ext = Path::new(name)
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        match ext.as_str() {
+            "rs" => "🦀",
+            "py" => "🐍",
+            "js" | "jsx" | "ts" | "tsx" => "📜",
+            "json" | "toml" | "yaml" | "yml" => "⚙️",
+            "md" | "txt" | "rst" => "📝",
+            "png" | "jpg" | "jpeg" | "gif" | "svg" | "webp" => "🖼️",
+            "zip" | "tar" | "gz" | "bz2" | "7z" => "📦",
+            "sh" | "bash" | "zsh" => "🐚",
+            "html" | "css" | "scss" => "🌐",
+            "lock" => "🔒",
+            _ => "📄",
+        }
+    }
+
+    // ========================================================================
+    // Top Bar & Header
+    // ========================================================================
+
     fn render_top_bar(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme_mode.get_theme();
+
         egui::Frame::new()
-            .fill(VpColors::BG_TOP)
-            .stroke(Stroke::new(1.0, VpColors::BORDER))
-            .inner_margin(Margin::same(12))
+            .fill(theme.bg_surface)
+            .stroke(Stroke::new(1.0, theme.border))
+            .inner_margin(Margin::symmetric(16, 12))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    // Title: Git Hub Grab GUI Vaporwave
-                    ui.label(RichText::new("🌴").size(26.0));
+                    // Title & Logo
+                    ui.label(RichText::new("🐙").size(24.0));
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("Git Hub Grab GUI")
-                                    .size(20.0)
+                                RichText::new("GitHub Grab")
+                                    .size(18.0)
                                     .strong()
-                                    .color(VpColors::PINK),
+                                    .color(theme.text_primary),
                             );
-                            ui.label(
-                                RichText::new("Vaporwave")
-                                    .size(17.0)
-                                    .strong()
-                                    .color(VpColors::CYAN),
-                            );
+                            ui.label(RichText::new("GUI").size(16.0).strong().color(theme.accent));
+                            ui.add_space(4.0);
+                            ui.label(RichText::new("v2.2.0").size(10.0).color(theme.text_muted));
                         });
                         ui.label(
-                            RichText::new("「 ＧＩＴ ＨＵＢ ＧＲＡＢ // ＶＡＰＯＲＷＡＶＥ 」")
-                                .size(10.0)
-                                .color(VpColors::PURPLE),
+                            RichText::new(
+                                "Fast repository files, folders & release asset downloader",
+                            )
+                            .size(11.0)
+                            .color(theme.text_secondary),
                         );
                     });
 
-                    ui.add_space(16.0);
+                    ui.add_space(20.0);
 
-                    // Tab buttons styled with vaporwave neon colors
+                    // Navigation Tabs
                     let tabs = [
-                        (AppTab::Browser, "📁 REPO FILES"),
-                        (AppTab::Releases, "🚀 RELEASE VAULT"),
-                        (AppTab::Search, "🔍 REPO RADAR"),
-                        (AppTab::Settings, "⚙️ CYBER CONFIG"),
+                        (AppTab::Browser, "📁 File Browser"),
+                        (AppTab::Releases, "🚀 Releases & Assets"),
+                        (AppTab::Search, "🔍 Search Repos"),
+                        (AppTab::Settings, "⚙️ Settings"),
                     ];
 
                     for (tab, label) in tabs {
                         let is_active = self.active_tab == tab;
                         let text = RichText::new(label).size(13.0);
                         let text = if is_active {
-                            text.strong().color(VpColors::PINK)
+                            text.strong().color(theme.accent)
                         } else {
-                            text.color(VpColors::TEXT_MUTED)
+                            text.color(theme.text_secondary)
                         };
 
                         if ui.selectable_label(is_active, text).clicked() {
                             self.active_tab = tab;
-                            if tab == AppTab::Releases && self.releases.is_empty() && self.current_gh_url.is_some() {
+                            if tab == AppTab::Releases
+                                && self.releases.is_empty()
+                                && self.current_gh_url.is_some()
+                            {
                                 self.is_busy = true;
-                                self.busy_message = "Fetching releases...".to_string();
+                                self.busy_message = "Fetching repository releases...".to_string();
                                 let _ = self.cmd_tx.send(GuiCommand::FetchReleases);
                             }
                         }
                     }
 
+                    // Right Side: Busy status & Theme Switcher
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Theme Switcher Quick Toggle
+                        let prev_theme = self.theme_mode;
+                        egui::ComboBox::from_id_salt("theme_selector_top")
+                            .selected_text(match self.theme_mode {
+                                ThemeMode::GitHubDark => "🌙 Dark",
+                                ThemeMode::GitHubLight => "☀️ Light",
+                                ThemeMode::Vaporwave => "🌴 Vaporwave",
+                            })
+                            .width(115.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(
+                                    &mut self.theme_mode,
+                                    ThemeMode::GitHubDark,
+                                    "🌙 Dark",
+                                );
+                                ui.selectable_value(
+                                    &mut self.theme_mode,
+                                    ThemeMode::GitHubLight,
+                                    "☀️ Light",
+                                );
+                                ui.selectable_value(
+                                    &mut self.theme_mode,
+                                    ThemeMode::Vaporwave,
+                                    "🌴 Vaporwave",
+                                );
+                            });
+
+                        if self.theme_mode != prev_theme {
+                            self.theme_mode.apply(ui.ctx());
+                        }
+
+                        ui.add_space(10.0);
+
+                        // Status message / Busy Spinner
                         if self.is_busy {
                             ui.spinner();
-                            ui.label(RichText::new(&self.busy_message).size(12.0).color(VpColors::YELLOW));
+                            ui.label(
+                                RichText::new(&self.busy_message)
+                                    .size(12.0)
+                                    .color(theme.warning),
+                            );
                         } else if let Some((msg, is_err, time)) = &self.status_message {
                             if time.elapsed().as_secs() < 8 {
-                                let color = if *is_err {
-                                    VpColors::PINK
-                                } else {
-                                    VpColors::MINT
-                                };
-                                ui.label(RichText::new(msg).size(12.0).color(color));
+                                let color = if *is_err { theme.error } else { theme.success };
+                                let icon = if *is_err { "❌ " } else { "✓ " };
+                                ui.label(
+                                    RichText::new(format!("{}{}", icon, msg))
+                                        .size(12.0)
+                                        .color(color),
+                                );
                             }
                         }
                     });
@@ -668,23 +975,30 @@ impl GhGrabGuiApp {
 
                 // URL Input Row
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("Repo URL:").size(13.0).strong().color(VpColors::CYAN));
+                    ui.label(
+                        RichText::new("Repo URL:")
+                            .size(13.0)
+                            .strong()
+                            .color(theme.text_primary),
+                    );
 
                     let text_edit = ui.add_sized(
-                        [ui.available_width() - 260.0, 26.0],
+                        [ui.available_width() - 250.0, 28.0],
                         egui::TextEdit::singleline(&mut self.repo_url_input)
                             .hint_text("https://github.com/owner/repo or GitLab / Gitea URL"),
                     );
 
-                    let enter_pressed = text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                    let enter_pressed =
+                        text_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
                     let load_btn = ui.add(
                         egui::Button::new(
-                            RichText::new("⚡ LOAD REPO")
+                            RichText::new("⚡ Load Repo")
                                 .strong()
-                                .color(VpColors::TEXT_DARK),
+                                .color(theme.text_on_accent),
                         )
-                        .fill(VpColors::PINK),
+                        .fill(theme.accent)
+                        .min_size(Vec2::new(100.0, 28.0)),
                     );
 
                     if load_btn.clicked() || enter_pressed {
@@ -694,39 +1008,53 @@ impl GhGrabGuiApp {
                             Some(self.token_input.trim().to_string())
                         };
                         self.is_busy = true;
-                        self.busy_message = "Fetching repo contents...".to_string();
+                        self.busy_message = "Fetching repository contents...".to_string();
                         let _ = self.cmd_tx.send(GuiCommand::LoadRepo {
                             url: self.repo_url_input.trim().to_string(),
                             token,
                         });
                     }
 
-                    if ui.button(RichText::new("📋 Paste").color(VpColors::CYAN)).clicked() {
-                        if let Some(text) = ui.ctx().input(|i| i.events.iter().find_map(|e| {
-                            if let egui::Event::Paste(s) = e {
-                                Some(s.clone())
-                            } else {
-                                None
-                            }
-                        })) {
+                    if ui
+                        .button(RichText::new("📋 Paste").color(theme.text_secondary))
+                        .clicked()
+                    {
+                        if let Some(text) = ui.ctx().input(|i| {
+                            i.events.iter().find_map(|e| {
+                                if let egui::Event::Paste(s) = e {
+                                    Some(s.clone())
+                                } else {
+                                    None
+                                }
+                            })
+                        }) {
                             self.repo_url_input = text;
                         }
                     }
                 });
 
-                // Quick Picks row in vaporwave neon pastels
+                ui.add_space(4.0);
+
+                // Quick Picks row
                 ui.horizontal(|ui| {
-                    ui.label(RichText::new("QUICK PICKS:").size(11.0).color(VpColors::TEXT_MUTED));
+                    ui.label(
+                        RichText::new("Quick Picks:")
+                            .size(11.0)
+                            .color(theme.text_muted),
+                    );
                     let quick_picks = [
-                        ("ratatui/ratatui", "https://github.com/ratatui/ratatui", VpColors::CYAN),
-                        ("tokio-rs/tokio", "https://github.com/tokio-rs/tokio", VpColors::PINK),
-                        ("rust-lang/rust", "https://github.com/rust-lang/rust", VpColors::MINT),
-                        ("astral-sh/uv", "https://github.com/astral-sh/uv", VpColors::YELLOW),
-                        ("emilk/egui", "https://github.com/emilk/egui", VpColors::PURPLE),
+                        ("ratatui/ratatui", "https://github.com/ratatui/ratatui"),
+                        ("tokio-rs/tokio", "https://github.com/tokio-rs/tokio"),
+                        ("rust-lang/rust", "https://github.com/rust-lang/rust"),
+                        ("astral-sh/uv", "https://github.com/astral-sh/uv"),
+                        ("emilk/egui", "https://github.com/emilk/egui"),
                     ];
 
-                    for (name, url, color) in quick_picks {
-                        if ui.link(RichText::new(name).size(11.0).color(color)).clicked() {
+                    for (name, url) in quick_picks {
+                        if ui
+                            .button(RichText::new(name).size(11.0).color(theme.accent))
+                            .clicked()
+                        {
                             self.repo_url_input = url.to_string();
                             let token = if self.token_input.trim().is_empty() {
                                 None
@@ -745,26 +1073,53 @@ impl GhGrabGuiApp {
             });
     }
 
+    // ========================================================================
+    // Left Sidebar: Download Matrix & Repository Meta
+    // ========================================================================
+
     fn render_sidebar(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme_mode.get_theme();
+
         egui::Frame::new()
-            .fill(VpColors::BG_SIDEBAR)
-            .stroke(Stroke::new(1.0, VpColors::BORDER))
-            .inner_margin(Margin::same(12))
+            .fill(theme.bg_panel)
+            .stroke(Stroke::new(1.0, theme.border))
+            .inner_margin(Margin::same(14))
             .show(ui, |ui| {
-                ui.heading(RichText::new("❖ DOWNLOAD MATRIX").size(15.0).strong().color(VpColors::PINK));
+                ui.heading(
+                    RichText::new("⬇ Download Options")
+                        .size(15.0)
+                        .strong()
+                        .color(theme.text_primary),
+                );
                 ui.add_space(8.0);
 
-                // Destination Folder
-                ui.label(RichText::new("Destination Folder:").size(12.0).strong().color(VpColors::TEXT_SECONDARY));
+                // Destination Folder Card
                 ui.label(
-                    RichText::new(self.dest_path.to_string_lossy())
-                        .size(11.0)
-                        .monospace()
-                        .color(VpColors::CYAN),
+                    RichText::new("Destination Directory:")
+                        .size(12.0)
+                        .strong()
+                        .color(theme.text_secondary),
                 );
 
+                egui::Frame::new()
+                    .fill(theme.bg_card)
+                    .stroke(Stroke::new(1.0, theme.border_subtle))
+                    .inner_margin(Margin::same(6))
+                    .show(ui, |ui| {
+                        ui.label(
+                            RichText::new(self.dest_path.to_string_lossy())
+                                .size(11.0)
+                                .monospace()
+                                .color(theme.text_primary),
+                        );
+                    });
+
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new("📂 Choose Folder...").color(VpColors::PURPLE)).clicked() {
+                    if ui
+                        .button(RichText::new("📂 Choose Folder...").color(theme.text_primary))
+                        .clicked()
+                    {
                         if let Some(folder) = rfd::FileDialog::new()
                             .set_directory(&self.dest_path)
                             .pick_folder()
@@ -773,70 +1128,110 @@ impl GhGrabGuiApp {
                         }
                     }
 
-                    if ui.button(RichText::new("🔍 In Finder").color(VpColors::MINT)).clicked() {
-                        let _ = std::fs::create_dir_all(&self.dest_path);
-                        let _ = Command::new("open").arg(&self.dest_path).spawn();
+                    if ui
+                        .button(RichText::new("🔍 Open Folder").color(theme.accent))
+                        .clicked()
+                    {
+                        open_path_in_file_manager(&self.dest_path);
                     }
                 });
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(8.0);
 
                 // Concurrency Slider
-                ui.horizontal(|ui| {
-                    ui.label(RichText::new("Parallel Streams:").color(VpColors::TEXT_SECONDARY));
-                    ui.add(egui::Slider::new(&mut self.concurrency, 1..=16));
-                });
+                ui.label(
+                    RichText::new(format!("Parallel Streams: {}", self.concurrency))
+                        .size(12.0)
+                        .strong()
+                        .color(theme.text_secondary),
+                );
+                ui.add(egui::Slider::new(&mut self.concurrency, 1..=16).show_value(false));
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
                 ui.separator();
                 ui.add_space(8.0);
 
-                // Selection Stats
+                // Selection Stats & Actions
                 let total_items = self.items.len();
                 let selected_count = self.selected_paths.len();
 
-                ui.label(
-                    RichText::new(format!("SELECTED // {} / {}", selected_count, total_items))
-                        .strong()
-                        .color(VpColors::YELLOW),
-                );
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new("Selected Items:")
+                            .size(12.0)
+                            .strong()
+                            .color(theme.text_secondary),
+                    );
+                    ui.label(
+                        RichText::new(format!("{}/{}", selected_count, total_items))
+                            .size(12.0)
+                            .strong()
+                            .color(theme.accent),
+                    );
+                });
 
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new("Select All").color(VpColors::CYAN)).clicked() {
+                    if ui
+                        .button(RichText::new("Select All").color(theme.text_primary))
+                        .clicked()
+                    {
                         for item in &self.items {
                             self.selected_paths.insert(item.path.clone());
                         }
                     }
-                    if ui.button(RichText::new("Clear").color(VpColors::TEXT_MUTED)).clicked() {
+                    if ui
+                        .button(RichText::new("Clear").color(theme.text_muted))
+                        .clicked()
+                    {
                         self.selected_paths.clear();
+                    }
+                    if ui
+                        .button(RichText::new("Files Only").color(theme.text_secondary))
+                        .clicked()
+                    {
+                        self.selected_paths.clear();
+                        for item in &self.items {
+                            if item.is_file() {
+                                self.selected_paths.insert(item.path.clone());
+                            }
+                        }
                     }
                 });
 
-                ui.add_space(16.0);
+                ui.add_space(14.0);
 
-                let can_download = selected_count > 0 && self.is_busy == false;
+                // Prominent Main Download Button
+                let can_download = selected_count > 0 && !self.is_busy;
                 let btn_text = if selected_count == 0 {
-                    "▼ SELECT ITEMS TO DOWNLOAD".to_string()
+                    "Select items to download".to_string()
                 } else {
-                    format!("▼ DOWNLOAD SELECTED ({})", selected_count)
+                    format!("⬇ Download Selected ({})", selected_count)
                 };
 
                 let download_btn = ui.add_enabled(
                     can_download,
-                    egui::Button::new(
-                        RichText::new(btn_text)
-                            .size(13.0)
-                            .strong()
-                            .color(if can_download { VpColors::TEXT_DARK } else { VpColors::TEXT_MUTED }),
-                    )
+                    egui::Button::new(RichText::new(btn_text).size(13.0).strong().color(
+                        if can_download {
+                            theme.text_on_accent
+                        } else {
+                            theme.text_muted
+                        },
+                    ))
                     .fill(if can_download {
-                        VpColors::PINK
+                        theme.success
                     } else {
-                        Color32::from_rgb(50, 26, 75)
+                        theme.bg_card
                     })
-                    .stroke(Stroke::new(1.0, if can_download { VpColors::CYAN } else { Color32::TRANSPARENT }))
+                    .stroke(Stroke::new(
+                        1.0,
+                        if can_download {
+                            theme.border_focus
+                        } else {
+                            theme.border_subtle
+                        },
+                    ))
                     .min_size(Vec2::new(ui.available_width(), 38.0)),
                 );
 
@@ -864,49 +1259,102 @@ impl GhGrabGuiApp {
                     });
                 }
 
+                // Progress Bar Display
                 if let Some((completed, total, msg)) = &self.download_progress {
                     ui.add_space(12.0);
                     let progress = if *total > 0 {
-                        *completed as f32 / *total as f32
+                        (*completed as f32 / *total as f32).min(1.0)
                     } else {
                         0.0
                     };
                     ui.add(egui::ProgressBar::new(progress).show_percentage());
-                    ui.label(RichText::new(msg).size(11.0).color(VpColors::YELLOW));
+                    ui.label(RichText::new(msg).size(11.0).color(theme.warning));
                 }
 
-                ui.add_space(16.0);
+                ui.add_space(14.0);
                 ui.separator();
                 ui.add_space(8.0);
 
-                // Repository Info card
+                // Repository Metadata Card
                 if let Some(gh_url) = &self.current_gh_url {
                     egui::Frame::new()
-                        .fill(VpColors::BG_CARD)
-                        .stroke(Stroke::new(1.0, VpColors::BORDER))
-                        .inner_margin(Margin::same(8))
+                        .fill(theme.bg_card)
+                        .stroke(Stroke::new(1.0, theme.border_subtle))
+                        .inner_margin(Margin::same(10))
                         .show(ui, |ui| {
-                            ui.heading(RichText::new("❖ REPO META").size(12.0).strong().color(VpColors::CYAN));
+                            ui.label(
+                                RichText::new("📦 Repository Info")
+                                    .size(12.0)
+                                    .strong()
+                                    .color(theme.accent),
+                            );
+                            ui.add_space(4.0);
+
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("Owner:").size(11.0).color(VpColors::MINT));
-                                ui.label(RichText::new(&gh_url.owner).size(11.0).color(VpColors::TEXT_PRIMARY));
+                                ui.label(
+                                    RichText::new("Owner:").size(11.0).color(theme.text_muted),
+                                );
+                                ui.label(
+                                    RichText::new(&gh_url.owner)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(theme.text_primary),
+                                );
                             });
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("Repo:").size(11.0).color(VpColors::PINK));
-                                ui.label(RichText::new(&gh_url.repo).size(11.0).color(VpColors::TEXT_PRIMARY));
+                                ui.label(RichText::new("Repo:").size(11.0).color(theme.text_muted));
+                                ui.label(
+                                    RichText::new(&gh_url.repo)
+                                        .size(11.0)
+                                        .strong()
+                                        .color(theme.text_primary),
+                                );
                             });
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("Branch:").size(11.0).color(VpColors::YELLOW));
-                                ui.label(RichText::new(&gh_url.branch).size(11.0).color(VpColors::TEXT_PRIMARY));
+                                ui.label(
+                                    RichText::new("Branch:").size(11.0).color(theme.text_muted),
+                                );
+                                ui.label(
+                                    RichText::new(&gh_url.branch)
+                                        .size(11.0)
+                                        .monospace()
+                                        .color(theme.text_secondary),
+                                );
                             });
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new("Host:").size(11.0).color(VpColors::PURPLE));
-                                ui.label(RichText::new(gh_url.platform.host()).size(11.0).color(VpColors::TEXT_PRIMARY));
+                                ui.label(RichText::new("Host:").size(11.0).color(theme.text_muted));
+                                ui.label(
+                                    RichText::new(gh_url.platform.host())
+                                        .size(11.0)
+                                        .color(theme.text_secondary),
+                                );
                             });
+
+                            ui.add_space(6.0);
+                            let web_url = format!(
+                                "https://{}/{}/{}",
+                                gh_url.platform.host(),
+                                gh_url.owner,
+                                gh_url.repo
+                            );
+                            if ui
+                                .button(
+                                    RichText::new("🌐 View on GitHub")
+                                        .size(11.0)
+                                        .color(theme.accent),
+                                )
+                                .clicked()
+                            {
+                                open_url_in_browser(&web_url);
+                            }
                         });
                 }
             });
     }
+
+    // ========================================================================
+    // File Browser Tab
+    // ========================================================================
 
     fn render_browser_tab(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
@@ -919,50 +1367,115 @@ impl GhGrabGuiApp {
             ui.separator();
 
             // Right pane: File Preview
-            ui.allocate_ui(Vec2::new(ui.available_width(), ui.available_height()), |ui| {
-                self.render_preview_panel(ui);
-            });
+            ui.allocate_ui(
+                Vec2::new(ui.available_width(), ui.available_height()),
+                |ui| {
+                    self.render_preview_panel(ui);
+                },
+            );
         });
     }
 
     fn render_file_list(&mut self, ui: &mut egui::Ui) {
-        // Breadcrumb & Filter Bar
+        let theme = self.theme_mode.get_theme();
+
+        // Breadcrumb Navigation Bar
         ui.horizontal(|ui| {
-            // Root button
-            if ui.button(RichText::new("🏠 /").color(VpColors::PINK)).clicked() {
+            let has_parent = !self.current_path.is_empty();
+            if ui
+                .add_enabled(has_parent, egui::Button::new("⬆ Up"))
+                .clicked()
+            {
+                let parent_path = if let Some(idx) = self.current_path.rfind('/') {
+                    self.current_path[..idx].to_string()
+                } else {
+                    String::new()
+                };
                 self.is_busy = true;
-                self.busy_message = "Navigating to root...".to_string();
-                let _ = self.cmd_tx.send(GuiCommand::NavigateTo { path: String::new() });
+                self.busy_message = if parent_path.is_empty() {
+                    "Navigating to root...".to_string()
+                } else {
+                    format!("Navigating to /{}...", parent_path)
+                };
+                let _ = self
+                    .cmd_tx
+                    .send(GuiCommand::NavigateTo { path: parent_path });
             }
 
-            // Path segments
+            if ui.button("🏠 root").clicked() {
+                self.is_busy = true;
+                self.busy_message = "Navigating to root...".to_string();
+                let _ = self.cmd_tx.send(GuiCommand::NavigateTo {
+                    path: String::new(),
+                });
+            }
+
             let mut accum_path = String::new();
             for (idx, seg) in self.path_breadcrumbs.clone().iter().enumerate() {
+                ui.label(RichText::new("/").color(theme.text_muted));
                 if idx > 0 {
                     accum_path.push('/');
                 }
                 accum_path.push_str(seg);
                 let target_path = accum_path.clone();
 
-                if ui.button(RichText::new(format!("{}/", seg)).color(VpColors::CYAN)).clicked() {
+                let is_last = idx == self.path_breadcrumbs.len() - 1;
+                let text = RichText::new(seg).strong();
+                let text = if is_last {
+                    text.color(theme.accent)
+                } else {
+                    text.color(theme.text_primary)
+                };
+
+                if ui.button(text).clicked() {
                     self.is_busy = true;
                     self.busy_message = format!("Navigating to /{}...", target_path);
-                    let _ = self.cmd_tx.send(GuiCommand::NavigateTo { path: target_path });
+                    let _ = self
+                        .cmd_tx
+                        .send(GuiCommand::NavigateTo { path: target_path });
                 }
             }
-
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.add_sized(
-                    [160.0, 22.0],
-                    egui::TextEdit::singleline(&mut self.filter_input)
-                        .hint_text("🔍 Filter files..."),
-                );
-            });
         });
 
+        ui.add_space(4.0);
+
+        // Filter search input
+        ui.horizontal(|ui| {
+            ui.label(RichText::new("🔍").size(13.0));
+            ui.add_sized(
+                [ui.available_width() - 75.0, 24.0],
+                egui::TextEdit::singleline(&mut self.filter_input)
+                    .hint_text("Filter files in folder..."),
+            );
+            if !self.filter_input.is_empty() && ui.button("✕ Clear").clicked() {
+                self.filter_input.clear();
+            }
+        });
+
+        ui.add_space(4.0);
         ui.separator();
 
-        // Items list
+        // Empty repository state
+        if self.items.is_empty() && !self.is_busy {
+            ui.vertical_centered(|ui| {
+                ui.add_space(40.0);
+                ui.label(RichText::new("📁").size(32.0));
+                ui.label(
+                    RichText::new("No files loaded.")
+                        .size(14.0)
+                        .strong()
+                        .color(theme.text_secondary),
+                );
+                ui.label(
+                    RichText::new("Enter a GitHub repository URL above and click 'Load Repo'.")
+                        .size(12.0)
+                        .color(theme.text_muted),
+                );
+            });
+            return;
+        }
+
+        // File and Folder List Scroll Area
         egui::ScrollArea::vertical().show(ui, |ui| {
             let filter = self.filter_input.to_lowercase();
             let mut navigate_to: Option<String> = None;
@@ -973,64 +1486,92 @@ impl GhGrabGuiApp {
                     continue;
                 }
 
-                let is_selected = self.selected_paths.contains(&item.path);
+                let is_selected_for_download = self.selected_paths.contains(&item.path);
+                let is_active_preview = self
+                    .selected_preview_item
+                    .as_ref()
+                    .map(|i| i.path == item.path)
+                    .unwrap_or(false);
 
-                ui.horizontal(|ui| {
-                    // Checkbox for batch download
-                    let mut checked = is_selected;
-                    if ui.checkbox(&mut checked, "").changed() {
-                        if checked {
-                            self.selected_paths.insert(item.path.clone());
-                        } else {
-                            self.selected_paths.remove(&item.path);
-                        }
-                    }
+                // Row frame with active preview highlight
+                let row_bg = if is_active_preview {
+                    theme.row_selected
+                } else {
+                    Color32::TRANSPARENT
+                };
 
-                    // Icon & Name in vaporwave pastel neon
-                    let (icon, color) = if item.is_dir() {
-                        ("📁", VpColors::CYAN)
-                    } else if item.is_lfs() {
-                        ("📦", VpColors::YELLOW)
-                    } else {
-                        ("📄", VpColors::TEXT_PRIMARY)
-                    };
+                egui::Frame::new()
+                    .fill(row_bg)
+                    .inner_margin(Margin::symmetric(6, 4))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // Checkbox for batch download
+                            let mut checked = is_selected_for_download;
+                            if ui.checkbox(&mut checked, "").changed() {
+                                if checked {
+                                    self.selected_paths.insert(item.path.clone());
+                                } else {
+                                    self.selected_paths.remove(&item.path);
+                                }
+                            }
 
-                    ui.label(RichText::new(icon).size(14.0));
+                            // File / Folder Icon
+                            let icon = Self::get_file_icon(&item.name, item.is_dir(), item.is_lfs());
+                            ui.label(RichText::new(icon).size(14.0));
 
-                    let name_btn = ui.link(RichText::new(&item.name).size(13.0).color(color));
-                    if name_btn.clicked() {
-                        if item.is_dir() {
-                            navigate_to = Some(item.path.clone());
-                        } else {
-                            preview_item = Some(item.clone());
-                        }
-                    }
-
-                    // Right side: Size badge and direct download button
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("⬇").size(12.0).color(VpColors::PINK)).clicked() {
-                            let token = if self.token_input.trim().is_empty() {
-                                None
+                            // Item Name Button
+                            let name_text = RichText::new(&item.name).size(13.0);
+                            let name_text = if item.is_dir() {
+                                name_text.strong().color(theme.folder)
+                            } else if is_active_preview {
+                                name_text.strong().color(theme.accent)
                             } else {
-                                Some(self.token_input.trim().to_string())
+                                name_text.color(theme.text_primary)
                             };
-                            self.is_busy = true;
-                            self.busy_message = format!("Downloading {}...", item.name);
-                            let _ = self.cmd_tx.send(GuiCommand::DownloadBatch {
-                                items: vec![item.clone()],
-                                dest: self.dest_path.clone(),
-                                token,
-                                jobs: 1,
-                            });
-                        }
 
-                        if let Some(size) = item.actual_size() {
-                            ui.label(RichText::new(Self::format_bytes(size)).size(11.0).monospace().color(VpColors::MINT));
-                        } else if item.is_dir() {
-                            ui.label(RichText::new("folder").size(11.0).color(VpColors::TEXT_MUTED));
-                        }
+                            let name_btn = ui.add(egui::Button::new(name_text).frame(false));
+                            if name_btn.clicked() {
+                                if item.is_dir() {
+                                    navigate_to = Some(item.path.clone());
+                                } else {
+                                    preview_item = Some(item.clone());
+                                }
+                            }
+
+                            // Right-aligned Size & Quick Download
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.button(RichText::new("⬇").size(12.0).color(theme.accent)).on_hover_text("Download this item").clicked() {
+                                    let token = if self.token_input.trim().is_empty() {
+                                        None
+                                    } else {
+                                        Some(self.token_input.trim().to_string())
+                                    };
+                                    self.is_busy = true;
+                                    self.busy_message = format!("Downloading {}...", item.name);
+                                    let _ = self.cmd_tx.send(GuiCommand::DownloadBatch {
+                                        items: vec![item.clone()],
+                                        dest: self.dest_path.clone(),
+                                        token,
+                                        jobs: 1,
+                                    });
+                                }
+
+                                if let Some(size) = item.actual_size() {
+                                    ui.label(
+                                        RichText::new(Self::format_bytes(size))
+                                            .size(11.0)
+                                            .monospace()
+                                            .color(theme.text_muted),
+                                    );
+                                } else if item.is_dir() {
+                                    ui.label(RichText::new("folder").size(11.0).color(theme.text_muted));
+                                } else if item.is_lfs() {
+                                    ui.label(RichText::new("LFS").size(11.0).color(theme.warning));
+                                }
+                            });
+                        });
                     });
-                });
+
                 ui.separator();
             }
 
@@ -1042,95 +1583,195 @@ impl GhGrabGuiApp {
 
             if let Some(item) = preview_item {
                 self.selected_preview_item = Some(item.clone());
-                self.preview_loading = true;
-                let _ = self.cmd_tx.send(GuiCommand::FetchFilePreview { item });
+                let ext = Path::new(&item.name)
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("");
+                if is_binary_extension(ext) {
+                    self.preview_loading = false;
+                    self.preview_content = Some(format!(
+                        "[Binary File: {} ({})]\nBinary files cannot be previewed in text mode.\nClick 'Download File' above to download this file.",
+                        item.name,
+                        item.actual_size().map(Self::format_bytes).unwrap_or_else(|| "unknown size".into())
+                    ));
+                } else {
+                    self.preview_loading = true;
+                    self.preview_content = None;
+                    let _ = self.cmd_tx.send(GuiCommand::FetchFilePreview { item });
+                }
             }
         });
     }
 
-    fn render_preview_panel(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.heading(RichText::new("❖ SOURCE PREVIEW").size(14.0).strong().color(VpColors::CYAN));
+    // ========================================================================
+    // File Preview Panel
+    // ========================================================================
 
-            if let Some(item) = &self.selected_preview_item {
+    fn render_preview_panel(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme_mode.get_theme();
+
+        ui.horizontal(|ui| {
+            ui.heading(
+                RichText::new("Source Preview")
+                    .size(14.0)
+                    .strong()
+                    .color(theme.text_primary),
+            );
+
+            let preview_item_opt = self.selected_preview_item.clone();
+            let preview_content_opt = self.preview_content.clone();
+
+            if let Some(ref item) = preview_item_opt {
+                let mut trigger_download = false;
+                let mut trigger_copy = false;
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let download_btn = ui.add(
                         egui::Button::new(
-                            RichText::new("▼ DOWNLOAD THIS FILE")
+                            RichText::new("⬇ Download File")
                                 .size(11.0)
                                 .strong()
-                                .color(VpColors::TEXT_DARK),
+                                .color(theme.text_on_accent),
                         )
-                        .fill(VpColors::PINK),
+                        .fill(theme.success),
                     );
 
                     if download_btn.clicked() {
-                        let token = if self.token_input.trim().is_empty() {
-                            None
-                        } else {
-                            Some(self.token_input.trim().to_string())
-                        };
-                        self.is_busy = true;
-                        self.busy_message = format!("Downloading {}...", item.name);
-                        let _ = self.cmd_tx.send(GuiCommand::DownloadBatch {
-                            items: vec![item.clone()],
-                            dest: self.dest_path.clone(),
-                            token,
-                            jobs: 1,
-                        });
+                        trigger_download = true;
+                    }
+
+                    if preview_content_opt.is_some()
+                        && ui
+                            .button(
+                                RichText::new("📋 Copy")
+                                    .size(11.0)
+                                    .color(theme.text_primary),
+                            )
+                            .clicked()
+                    {
+                        trigger_copy = true;
                     }
 
                     if let Some(size) = item.actual_size() {
-                        ui.label(RichText::new(Self::format_bytes(size)).size(11.0).monospace().color(VpColors::MINT));
+                        ui.label(
+                            RichText::new(Self::format_bytes(size))
+                                .size(11.0)
+                                .monospace()
+                                .color(theme.text_muted),
+                        );
                     }
                 });
+
+                if trigger_download {
+                    let token = if self.token_input.trim().is_empty() {
+                        None
+                    } else {
+                        Some(self.token_input.trim().to_string())
+                    };
+                    self.is_busy = true;
+                    self.busy_message = format!("Downloading {}...", item.name);
+                    let _ = self.cmd_tx.send(GuiCommand::DownloadBatch {
+                        items: vec![item.clone()],
+                        dest: self.dest_path.clone(),
+                        token,
+                        jobs: 1,
+                    });
+                }
+
+                if trigger_copy {
+                    if let Some(content) = &preview_content_opt {
+                        ui.ctx().copy_text(content.clone());
+                        self.set_status("Copied code to clipboard!", false);
+                    }
+                }
             }
         });
 
         ui.separator();
 
         if let Some(item) = &self.selected_preview_item {
-            ui.label(RichText::new(&item.path).size(12.0).monospace().color(VpColors::PINK));
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(&item.path)
+                        .size(11.0)
+                        .monospace()
+                        .color(theme.accent),
+                );
+            });
 
             if self.preview_loading {
-                ui.horizontal(|ui| {
+                ui.vertical_centered(|ui| {
+                    ui.add_space(40.0);
                     ui.spinner();
-                    ui.label(RichText::new("Reading file...").color(VpColors::YELLOW));
+                    ui.label(
+                        RichText::new("Loading file preview...")
+                            .size(12.0)
+                            .color(theme.text_secondary),
+                    );
                 });
             } else if let Some(content) = &self.preview_content {
-                egui::ScrollArea::both().show(ui, |ui| {
-                    egui::Frame::new()
-                        .fill(VpColors::BG_PREVIEW)
-                        .stroke(Stroke::new(1.0, VpColors::BORDER))
-                        .inner_margin(Margin::same(8))
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::TextEdit::multiline(&mut content.as_str())
-                                    .font(egui::TextStyle::Monospace)
-                                    .text_color(VpColors::TEXT_PRIMARY)
-                                    .code_editor()
-                                    .desired_width(f32::INFINITY),
-                            );
+                egui::Frame::new()
+                    .fill(theme.bg_code)
+                    .stroke(Stroke::new(1.0, theme.border_subtle))
+                    .inner_margin(Margin::same(8))
+                    .show(ui, |ui| {
+                        egui::ScrollArea::both().show(ui, |ui| {
+                            ui.vertical(|ui| {
+                                for (idx, line) in content.lines().enumerate() {
+                                    ui.horizontal(|ui| {
+                                        ui.label(
+                                            RichText::new(format!("{:>4} │", idx + 1))
+                                                .size(11.0)
+                                                .monospace()
+                                                .color(theme.text_muted),
+                                        );
+                                        ui.label(
+                                            RichText::new(line)
+                                                .size(11.0)
+                                                .monospace()
+                                                .color(theme.text_primary),
+                                        );
+                                    });
+                                }
+                            });
                         });
-                });
+                    });
             }
         } else {
             ui.vertical_centered(|ui| {
                 ui.add_space(50.0);
-                ui.label(RichText::new("⚡").size(36.0).color(VpColors::PINK));
-                ui.label(RichText::new("SELECT A FILE TO INSPECT CODE").size(13.0).color(VpColors::TEXT_MUTED));
+                ui.label(RichText::new("📄").size(36.0));
+                ui.label(
+                    RichText::new("Select a file from the repository to view its contents.")
+                        .size(13.0)
+                        .color(theme.text_muted),
+                );
             });
         }
     }
 
+    // ========================================================================
+    // Releases Tab
+    // ========================================================================
+
     fn render_releases_tab(&mut self, ui: &mut egui::Ui) {
+        let theme = self.theme_mode.get_theme();
+
         ui.horizontal(|ui| {
-            ui.heading(RichText::new("❖ RELEASES & BINARY ASSETS").size(16.0).strong().color(VpColors::PINK));
+            ui.heading(
+                RichText::new("🚀 Releases & Binary Assets")
+                    .size(16.0)
+                    .strong()
+                    .color(theme.text_primary),
+            );
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(RichText::new("🔄 Refresh").color(VpColors::CYAN)).clicked() {
+                if ui
+                    .button(RichText::new("🔄 Refresh").color(theme.accent))
+                    .clicked()
+                {
                     self.is_busy = true;
-                    self.busy_message = "Fetching releases...".to_string();
+                    self.busy_message = "Fetching repository releases...".to_string();
                     let _ = self.cmd_tx.send(GuiCommand::FetchReleases);
                 }
             });
@@ -1141,11 +1782,18 @@ impl GhGrabGuiApp {
         if self.releases.is_empty() {
             ui.vertical_centered(|ui| {
                 ui.add_space(50.0);
-                ui.label(RichText::new("🚀").size(36.0).color(VpColors::CYAN));
-                ui.label(RichText::new("No releases cached. Load a repository first.").color(VpColors::TEXT_MUTED));
-                if ui.button(RichText::new("FETCH RELEASES NOW").color(VpColors::PINK)).clicked() {
+                ui.label(RichText::new("📦").size(36.0));
+                ui.label(
+                    RichText::new("No releases cached. Load a repository first.")
+                        .size(13.0)
+                        .color(theme.text_muted),
+                );
+                if ui
+                    .button(RichText::new("Fetch Releases Now").color(theme.accent))
+                    .clicked()
+                {
                     self.is_busy = true;
-                    self.busy_message = "Fetching releases...".to_string();
+                    self.busy_message = "Fetching repository releases...".to_string();
                     let _ = self.cmd_tx.send(GuiCommand::FetchReleases);
                 }
             });
@@ -1157,17 +1805,28 @@ impl GhGrabGuiApp {
 
             for release in &self.releases {
                 egui::Frame::new()
-                    .fill(VpColors::BG_CARD)
-                    .stroke(Stroke::new(1.0, VpColors::BORDER))
+                    .fill(theme.bg_card)
+                    .stroke(Stroke::new(1.0, theme.border))
                     .inner_margin(Margin::same(12))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&release.tag_name).size(15.0).strong().color(VpColors::CYAN));
+                            ui.label(
+                                RichText::new(&release.tag_name)
+                                    .size(15.0)
+                                    .strong()
+                                    .color(theme.accent),
+                            );
                             if release.prerelease {
-                                ui.label(RichText::new("[Pre-release]").size(11.0).color(VpColors::YELLOW));
+                                ui.label(
+                                    RichText::new("[Pre-release]")
+                                        .size(11.0)
+                                        .color(theme.warning),
+                                );
                             }
                             if release.draft {
-                                ui.label(RichText::new("[Draft]").size(11.0).color(VpColors::TEXT_MUTED));
+                                ui.label(
+                                    RichText::new("[Draft]").size(11.0).color(theme.text_muted),
+                                );
                             }
                         });
 
@@ -1176,14 +1835,33 @@ impl GhGrabGuiApp {
                         for asset in &release.assets {
                             ui.horizontal(|ui| {
                                 ui.label(RichText::new("📦").size(13.0));
-                                ui.label(RichText::new(&asset.name).size(13.0).strong().color(VpColors::TEXT_PRIMARY));
-                                ui.label(RichText::new(format!("({})", Self::format_bytes(asset.size))).size(11.0).monospace().color(VpColors::MINT));
+                                ui.label(
+                                    RichText::new(&asset.name)
+                                        .size(13.0)
+                                        .strong()
+                                        .color(theme.text_primary),
+                                );
+                                ui.label(
+                                    RichText::new(format!("({})", Self::format_bytes(asset.size)))
+                                        .size(11.0)
+                                        .monospace()
+                                        .color(theme.text_muted),
+                                );
 
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button(RichText::new("▼ Grab Asset").color(VpColors::PINK)).clicked() {
-                                        download_asset = Some(asset.clone());
-                                    }
-                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .button(
+                                                RichText::new("⬇ Download Asset")
+                                                    .color(theme.success),
+                                            )
+                                            .clicked()
+                                        {
+                                            download_asset = Some(asset.clone());
+                                        }
+                                    },
+                                );
                             });
                             ui.separator();
                         }
@@ -1208,31 +1886,45 @@ impl GhGrabGuiApp {
         });
     }
 
+    // ========================================================================
+    // Repository Search Tab
+    // ========================================================================
+
     fn render_search_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading(RichText::new("❖ REPOSITORY DISCOVERY").size(16.0).strong().color(VpColors::CYAN));
+        let theme = self.theme_mode.get_theme();
+
+        ui.heading(
+            RichText::new("🔍 Search GitHub Repositories")
+                .size(16.0)
+                .strong()
+                .color(theme.text_primary),
+        );
         ui.add_space(6.0);
 
         ui.horizontal(|ui| {
             let search_edit = ui.add_sized(
-                [ui.available_width() - 130.0, 26.0],
+                [ui.available_width() - 130.0, 28.0],
                 egui::TextEdit::singleline(&mut self.search_query_input)
-                    .hint_text("Type keyword (e.g. ratatui, tokio, tui, rust-cli)..."),
+                    .hint_text("Search by keyword (e.g. ratatui, tokio, tui, rust-cli)..."),
             );
 
-            let enter_pressed = search_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let enter_pressed =
+                search_edit.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
 
             let search_btn = ui.add(
                 egui::Button::new(
-                    RichText::new("🔍 SEARCH")
+                    RichText::new("🔍 Search")
                         .strong()
-                        .color(VpColors::TEXT_DARK),
+                        .color(theme.text_on_accent),
                 )
-                .fill(VpColors::PINK),
+                .fill(theme.accent)
+                .min_size(Vec2::new(100.0, 28.0)),
             );
 
-            if (search_btn.clicked() || enter_pressed) && !self.search_query_input.trim().is_empty() {
+            if (search_btn.clicked() || enter_pressed) && !self.search_query_input.trim().is_empty()
+            {
                 self.is_busy = true;
-                self.busy_message = format!("Searching '{}'...", self.search_query_input);
+                self.busy_message = format!("Searching for '{}'...", self.search_query_input);
                 let _ = self.cmd_tx.send(GuiCommand::SearchRepositories {
                     query: self.search_query_input.trim().to_string(),
                 });
@@ -1246,27 +1938,55 @@ impl GhGrabGuiApp {
 
             for item in &self.search_results {
                 egui::Frame::new()
-                    .fill(VpColors::BG_CARD)
-                    .stroke(Stroke::new(1.0, VpColors::BORDER))
-                    .inner_margin(Margin::same(10))
+                    .fill(theme.bg_card)
+                    .stroke(Stroke::new(1.0, theme.border))
+                    .inner_margin(Margin::same(12))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(&item.full_name).size(14.0).strong().color(VpColors::CYAN));
+                            ui.label(
+                                RichText::new(&item.full_name)
+                                    .size(14.0)
+                                    .strong()
+                                    .color(theme.accent),
+                            );
 
-                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                if ui.button(RichText::new("⚡ Open Repo").color(VpColors::PINK)).clicked() {
-                                    load_repo_url = Some(item.html_url.clone());
-                                }
-                                ui.label(RichText::new(format!("★ {}", item.stargazers_count)).size(12.0).color(VpColors::YELLOW));
-                                if let Some(lang) = &item.language {
-                                    ui.label(RichText::new(lang).size(11.0).color(VpColors::MINT));
-                                }
-                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if ui
+                                        .button(
+                                            RichText::new("⚡ Load Repo")
+                                                .color(theme.text_on_accent),
+                                        )
+                                        .clicked()
+                                    {
+                                        load_repo_url = Some(item.html_url.clone());
+                                    }
+                                    if ui
+                                        .button(
+                                            RichText::new("🌐 View").color(theme.text_secondary),
+                                        )
+                                        .clicked()
+                                    {
+                                        open_url_in_browser(&item.html_url);
+                                    }
+                                    ui.label(
+                                        RichText::new(format!("★ {}", item.stargazers_count))
+                                            .size(12.0)
+                                            .color(theme.warning),
+                                    );
+                                    if let Some(lang) = &item.language {
+                                        ui.label(
+                                            RichText::new(lang).size(11.0).color(theme.success),
+                                        );
+                                    }
+                                },
+                            );
                         });
 
                         if let Some(desc) = &item.description {
                             ui.add_space(4.0);
-                            ui.label(RichText::new(desc).size(12.0).color(VpColors::TEXT_SECONDARY));
+                            ui.label(RichText::new(desc).size(12.0).color(theme.text_secondary));
                         }
                     });
                 ui.add_space(8.0);
@@ -1287,29 +2007,103 @@ impl GhGrabGuiApp {
         });
     }
 
+    // ========================================================================
+    // Settings & Configuration Tab
+    // ========================================================================
+
     fn render_settings_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading(RichText::new("❖ SETTINGS // AUTHENTICATION").size(16.0).strong().color(VpColors::PINK));
+        let theme = self.theme_mode.get_theme();
+
+        ui.heading(
+            RichText::new("⚙️ Settings & Configuration")
+                .size(16.0)
+                .strong()
+                .color(theme.text_primary),
+        );
         ui.add_space(10.0);
 
+        // Appearance / Theme Section
         egui::Frame::new()
-            .fill(VpColors::BG_CARD)
-            .stroke(Stroke::new(1.0, VpColors::BORDER))
-            .inner_margin(Margin::same(16))
+            .fill(theme.bg_card)
+            .stroke(Stroke::new(1.0, theme.border))
+            .inner_margin(Margin::same(14))
             .show(ui, |ui| {
-                ui.label(RichText::new("GitHub Personal Access Token").size(13.0).strong().color(VpColors::CYAN));
-                ui.label(RichText::new("Using a token increases rate limit from 60 to 5,000 requests/hr and enables private repository access.").size(11.0).color(VpColors::TEXT_MUTED));
+                ui.label(
+                    RichText::new("Interface Appearance & Theme")
+                        .size(13.0)
+                        .strong()
+                        .color(theme.text_primary),
+                );
+                ui.label(
+                    RichText::new(
+                        "Choose an appearance theme designed for optimal contrast and readability.",
+                    )
+                    .size(11.0)
+                    .color(theme.text_muted),
+                );
 
-                ui.add_space(6.0);
+                ui.add_space(8.0);
+
+                let prev_theme = self.theme_mode;
+                ui.horizontal(|ui| {
+                    ui.selectable_value(
+                        &mut self.theme_mode,
+                        ThemeMode::GitHubDark,
+                        "🌙 GitHub Dark (Default)",
+                    );
+                    ui.selectable_value(
+                        &mut self.theme_mode,
+                        ThemeMode::GitHubLight,
+                        "☀️ GitHub Light",
+                    );
+                    ui.selectable_value(
+                        &mut self.theme_mode,
+                        ThemeMode::Vaporwave,
+                        "🌴 Vaporwave (High Contrast)",
+                    );
+                });
+
+                if self.theme_mode != prev_theme {
+                    self.theme_mode.apply(ui.ctx());
+                }
+            });
+
+        ui.add_space(12.0);
+
+        // GitHub Authentication Card
+        egui::Frame::new()
+            .fill(theme.bg_card)
+            .stroke(Stroke::new(1.0, theme.border))
+            .inner_margin(Margin::same(14))
+            .show(ui, |ui| {
+                ui.label(
+                    RichText::new("GitHub Personal Access Token")
+                        .size(13.0)
+                        .strong()
+                        .color(theme.text_primary),
+                );
+                ui.label(
+                    RichText::new("Providing a token increases your GitHub API rate limit from 60 to 5,000 requests/hr and enables private repository access.")
+                        .size(11.0)
+                        .color(theme.text_muted),
+                );
+
+                ui.add_space(8.0);
 
                 ui.horizontal(|ui| {
                     ui.add_sized(
-                        [ui.available_width() - 170.0, 26.0],
+                        [ui.available_width() - 260.0, 26.0],
                         egui::TextEdit::singleline(&mut self.token_input)
-                            .password(true)
+                            .password(!self.show_token)
                             .hint_text("ghp_... or gho_..."),
                     );
 
-                    if ui.button(RichText::new("🔑 Import from `gh`").color(VpColors::CYAN)).clicked() {
+                    let show_btn_text = if self.show_token { "🙈 Hide" } else { "👁 Show" };
+                    if ui.button(show_btn_text).clicked() {
+                        self.show_token = !self.show_token;
+                    }
+
+                    if ui.button(RichText::new("🔑 Import from `gh`").color(theme.accent)).clicked() {
                         if let Ok(output) = Command::new("gh").args(["auth", "token"]).output() {
                             if output.status.success() {
                                 let tok = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -1324,40 +2118,88 @@ impl GhGrabGuiApp {
                     }
                 });
 
-                ui.add_space(16.0);
-                ui.separator();
                 ui.add_space(12.0);
+                ui.separator();
+                ui.add_space(8.0);
 
-                ui.label(RichText::new("Default Download Directory").size(13.0).strong().color(VpColors::CYAN));
-                ui.label(RichText::new(self.dest_path.to_string_lossy()).size(11.0).monospace().color(VpColors::MINT));
+                ui.label(
+                    RichText::new("Default Download Directory")
+                        .size(13.0)
+                        .strong()
+                        .color(theme.text_primary),
+                );
+                ui.label(
+                    RichText::new(self.dest_path.to_string_lossy())
+                        .size(11.0)
+                        .monospace()
+                        .color(theme.accent),
+                );
 
                 ui.add_space(6.0);
 
-                if ui.button(RichText::new("📂 Change Directory...").color(VpColors::PURPLE)).clicked() {
-                    if let Some(folder) = rfd::FileDialog::new().set_directory(&self.dest_path).pick_folder() {
-                        self.dest_path = folder;
-                    }
-                }
-            });
-
-        ui.add_space(16.0);
-
-        // Download activity log styled like a retro synth terminal
-        ui.heading(RichText::new("❖ ACTIVITY CONSOLE").size(13.0).strong().color(VpColors::CYAN));
-        egui::Frame::new()
-            .fill(VpColors::BG_PREVIEW)
-            .stroke(Stroke::new(1.0, VpColors::BORDER))
-            .inner_margin(Margin::same(10))
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
-                    if self.download_logs.is_empty() {
-                        ui.label(RichText::new("// no network downloads logged yet //").size(11.0).color(VpColors::TEXT_MUTED));
-                    } else {
-                        for log in self.download_logs.iter().rev() {
-                            ui.label(RichText::new(format!("> {}", log)).size(11.0).monospace().color(VpColors::MINT));
+                ui.horizontal(|ui| {
+                    if ui.button(RichText::new("📂 Change Directory...").color(theme.text_primary)).clicked() {
+                        if let Some(folder) = rfd::FileDialog::new().set_directory(&self.dest_path).pick_folder() {
+                            self.dest_path = folder;
                         }
                     }
+
+                    if ui.button(RichText::new("🔍 Open in File Manager").color(theme.accent)).clicked() {
+                        open_path_in_file_manager(&self.dest_path);
+                    }
                 });
+            });
+
+        ui.add_space(12.0);
+
+        // Activity Log Console
+        ui.horizontal(|ui| {
+            ui.heading(
+                RichText::new("Activity Console")
+                    .size(13.0)
+                    .strong()
+                    .color(theme.text_primary),
+            );
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .button(
+                        RichText::new("Clear Log")
+                            .size(11.0)
+                            .color(theme.text_muted),
+                    )
+                    .clicked()
+                {
+                    self.download_logs.clear();
+                }
+            });
+        });
+
+        egui::Frame::new()
+            .fill(theme.bg_code)
+            .stroke(Stroke::new(1.0, theme.border_subtle))
+            .inner_margin(Margin::same(10))
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(180.0)
+                    .show(ui, |ui| {
+                        if self.download_logs.is_empty() {
+                            ui.label(
+                                RichText::new("// No network downloads logged yet //")
+                                    .size(11.0)
+                                    .color(theme.text_muted),
+                            );
+                        } else {
+                            for log in self.download_logs.iter().rev() {
+                                ui.label(
+                                    RichText::new(format!("> {}", log))
+                                        .size(11.0)
+                                        .monospace()
+                                        .color(theme.text_secondary),
+                                );
+                            }
+                        }
+                    });
             });
     }
 }
@@ -1366,47 +2208,45 @@ impl eframe::App for GhGrabGuiApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_events();
 
-        // Enforce dark vaporwave visuals on every frame so OS light mode can NEVER make it white!
-        let mut visuals = egui::Visuals::dark();
-        visuals.dark_mode = true;
-        visuals.panel_fill = VpColors::BG_BASE;
-        visuals.window_fill = VpColors::BG_BASE;
-        visuals.extreme_bg_color = VpColors::BG_INPUT;
-        visuals.faint_bg_color = VpColors::BG_CARD;
-        visuals.code_bg_color = VpColors::BG_PREVIEW;
-        visuals.hyperlink_color = VpColors::CYAN;
-        visuals.warn_fg_color = VpColors::YELLOW;
-        visuals.error_fg_color = VpColors::PINK;
-        visuals.override_text_color = Some(VpColors::TEXT_PRIMARY);
-        ui.ctx().set_visuals(visuals);
+        let theme = self.theme_mode.get_theme();
 
-        // Top Header and Navigation Bar with explicit dark frame
+        // Top Header
         egui::Panel::top("top_panel")
-            .frame(egui::Frame::new().fill(VpColors::BG_TOP).stroke(Stroke::new(1.0, VpColors::BORDER)))
+            .frame(
+                egui::Frame::new()
+                    .fill(theme.bg_surface)
+                    .stroke(Stroke::new(1.0, theme.border)),
+            )
             .show(ui, |ui| {
                 self.render_top_bar(ui);
             });
 
-        // Left sidebar for download config & actions with explicit dark frame
+        // Left Sidebar
         egui::Panel::left("left_sidebar")
-            .default_size(290.0)
-            .min_size(250.0)
-            .max_size(360.0)
-            .frame(egui::Frame::new().fill(VpColors::BG_SIDEBAR).stroke(Stroke::new(1.0, VpColors::BORDER)))
+            .default_size(300.0)
+            .min_size(260.0)
+            .max_size(380.0)
+            .frame(
+                egui::Frame::new()
+                    .fill(theme.bg_panel)
+                    .stroke(Stroke::new(1.0, theme.border)),
+            )
             .show(ui, |ui| {
                 self.render_sidebar(ui);
             });
 
-        // Main content area with explicit dark background frame
+        // Central Panel
         egui::CentralPanel::default()
-            .frame(egui::Frame::new().fill(VpColors::BG_BASE).inner_margin(Margin::same(12)))
-            .show(ui, |ui| {
-                match self.active_tab {
-                    AppTab::Browser => self.render_browser_tab(ui),
-                    AppTab::Releases => self.render_releases_tab(ui),
-                    AppTab::Search => self.render_search_tab(ui),
-                    AppTab::Settings => self.render_settings_tab(ui),
-                }
+            .frame(
+                egui::Frame::new()
+                    .fill(theme.bg_base)
+                    .inner_margin(Margin::same(12)),
+            )
+            .show(ui, |ui| match self.active_tab {
+                AppTab::Browser => self.render_browser_tab(ui),
+                AppTab::Releases => self.render_releases_tab(ui),
+                AppTab::Search => self.render_search_tab(ui),
+                AppTab::Settings => self.render_settings_tab(ui),
             });
     }
 }
@@ -1415,13 +2255,13 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1180.0, 780.0])
-            .with_min_inner_size([800.0, 550.0])
-            .with_title("Git Hub Grab GUI Vaporwave"),
+            .with_min_inner_size([850.0, 550.0])
+            .with_title("GitHub Grab GUI"),
         ..Default::default()
     };
 
     eframe::run_native(
-        "Git Hub Grab GUI Vaporwave",
+        "GitHub Grab GUI",
         options,
         Box::new(|cc| Ok(Box::new(GhGrabGuiApp::new(cc)))),
     )

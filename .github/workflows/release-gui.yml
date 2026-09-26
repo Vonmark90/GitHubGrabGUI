@@ -1,4 +1,4 @@
-name: Release Git Hub Grab GUI Vaporwave
+name: Release GitHub Grab GUI
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
       - name: Package macOS .app Bundle
         shell: bash
         run: |
-          APP_NAME="Git Hub Grab GUI Vaporwave.app"
+          APP_NAME="GitHub Grab GUI.app"
           APP_DIR="dist-app/$APP_NAME"
           mkdir -p "$APP_DIR/Contents/MacOS"
           mkdir -p "$APP_DIR/Contents/Resources"
@@ -57,23 +57,23 @@ jobs:
               <key>CFBundleDevelopmentRegion</key>
               <string>en</string>
               <key>CFBundleDisplayName</key>
-              <string>Git Hub Grab GUI Vaporwave</string>
+              <string>GitHub Grab GUI</string>
               <key>CFBundleExecutable</key>
               <string>ghgrab-gui</string>
               <key>CFBundleIconFile</key>
               <string>AppIcon</string>
               <key>CFBundleIdentifier</key>
-              <string>com.abhixdd.github-grab-gui-vaporwave</string>
+              <string>com.vonmark90.github-grab-gui</string>
               <key>CFBundleInfoDictionaryVersion</key>
               <string>6.0</string>
               <key>CFBundleName</key>
-              <string>Git Hub Grab GUI Vaporwave</string>
+              <string>GitHub Grab GUI</string>
               <key>CFBundlePackageType</key>
               <string>APPL</string>
               <key>CFBundleShortVersionString</key>
-              <string>2.1.0</string>
+              <string>2.2.0</string>
               <key>CFBundleVersion</key>
-              <string>2.1.0</string>
+              <string>2.2.0</string>
               <key>LSMinimumSystemVersion</key>
               <string>10.13</string>
               <key>NSHighResolutionCapable</key>
@@ -83,7 +83,7 @@ jobs:
           EOF
 
           mkdir -p out
-          ARCHIVE_NAME="Git-Hub-Grab-GUI-Vaporwave-${{ matrix.suffix }}.zip"
+          ARCHIVE_NAME="GitHub-Grab-GUI-${{ matrix.suffix }}.zip"
           ditto -c -k --sequesterRsrc --keepParent "$APP_DIR" "out/$ARCHIVE_NAME"
 
       - name: Upload Artifact
@@ -134,8 +134,8 @@ jobs:
 
           cat << "EOF" > pkg/share/applications/ghgrab-gui.desktop
           [Desktop Entry]
-          Name=Git Hub Grab GUI Vaporwave
-          Comment=Vaporwave Git Forge Downloader GUI
+          Name=GitHub Grab GUI
+          Comment=Fast GitHub Repository, Folder & Release Asset Downloader
           Exec=ghgrab-gui
           Icon=ghgrab-gui
           Terminal=false
@@ -144,7 +144,7 @@ jobs:
           EOF
 
           mkdir -p out
-          ARCHIVE_NAME="Git-Hub-Grab-GUI-Vaporwave-Linux-x86_64.tar.gz"
+          ARCHIVE_NAME="GitHub-Grab-GUI-Linux-x86_64.tar.gz"
           tar -czvf "out/$ARCHIVE_NAME" -C pkg .
 
       - name: Upload Artifact
@@ -176,7 +176,7 @@ jobs:
           if [ -f "LICENSE" ]; then cp LICENSE pkg-win/; fi
 
           mkdir -p out
-          ARCHIVE_NAME="Git-Hub-Grab-GUI-Vaporwave-Windows-x86_64.zip"
+          ARCHIVE_NAME="GitHub-Grab-GUI-Windows-x86_64.zip"
           cd pkg-win && 7z a "../out/$ARCHIVE_NAME" *
 
       - name: Upload Artifact
@@ -210,29 +210,31 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          TAG_NAME="${GITHUB_REF_NAME:-v2.2.0-vaporwave}"
+          TAG_NAME="${GITHUB_REF_NAME:-v2.2.1}"
           if [[ "$TAG_NAME" != v* ]]; then
-            TAG_NAME="v2.2.0-vaporwave"
+            TAG_NAME="v2.2.1"
           fi
 
           cat << "EOF" > release_notes.md
-          ### 🌴 Git Hub Grab GUI Vaporwave Edition
+          ### 🐙 GitHub Grab GUI Release
 
-          Cross-platform release packages for macOS, Linux, and Windows:
+          Cross-platform graphical releases for macOS, Linux, and Windows:
 
-          - **macOS (Apple Silicon & Intel)**: \`Git-Hub-Grab-GUI-Vaporwave-macos-arm64.zip\`, \`Git-Hub-Grab-GUI-Vaporwave-macos-x86_64.zip\`
-          - **Linux (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Linux-x86_64.tar.gz\`
-          - **Windows (x86_64)**: \`Git-Hub-Grab-GUI-Vaporwave-Windows-x86_64.zip\`
+          - **macOS (Apple Silicon & Intel)**: \`GitHub-Grab-GUI-macos-arm64.zip\`, \`GitHub-Grab-GUI-macos-x86_64.zip\`
+          - **Linux (x86_64)**: \`GitHub-Grab-GUI-Linux-x86_64.tar.gz\`
+          - **Windows (x86_64)**: \`GitHub-Grab-GUI-Windows-x86_64.zip\`
 
-          #### Features:
-          - 🌴 Complete Vaporwave dark obsidian & neon color theme
-          - 📁 Interactive repository browser with live file code previewer
-          - 🚀 GitHub Release & asset downloader
-          - 🔍 Built-in GitHub repo search & discovery
-          - ⚡ High-performance pure Rust GUI powered by egui & tokio
+          #### Enhancements & Fixes:
+          - 🌙 **High-Contrast GitHub Dark & Light Themes**: Crystal-clear typography with WCAG AAA readability, eliminating low-contrast eye strain.
+          - 🌴 **Vaporwave (High-Contrast Edition)**: Optional retro synth theme with enhanced, fully readable text and panels.
+          - 📁 **Enhanced File Browser**: Directories sorted first alphabetically, parent directory navigation (\`⬆ Up\`), and interactive breadcrumbs.
+          - 📄 **Source Code Viewer**: Line numbers, monospace code viewer, copy-to-clipboard, and binary file detection.
+          - 🚀 **GitHub Release Vault**: Browse releases, inspect assets, and download binaries directly.
+          - 🔍 **Repository Search**: Integrated search to find and load repos instantly.
+          - ⚡ **Performance**: Native Rust GUI powered by egui and tokio.
           EOF
 
           gh release create "$TAG_NAME" ./release-assets/* \
-            --title "🌴 Git Hub Grab GUI Vaporwave ($TAG_NAME)" \
+            --title "🐙 GitHub Grab GUI ($TAG_NAME)" \
             --notes-file release_notes.md \
             --clobber
